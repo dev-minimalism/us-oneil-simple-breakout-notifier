@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oneil-breakout"
+version = "3.0.0"
+description = "William O'Neil Breakout Trading Bot - CAN SLIM strategy pattern detection for US and Korean stocks"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Yungoo Park", email = "ygpark@lendingmachine.co.kr"}
+]
+keywords = [
+    "trading",
+    "stock",
+    "breakout",
+    "canslim",
+    "william-oneil",
+    "telegram-bot",
+    "technical-analysis"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "yfinance>=0.2.40",
+    "pykrx>=1.0.45",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/dev-minimalism/oneil-breakout"
+Repository = "https://github.com/dev-minimalism/oneil-breakout"
+Issues = "https://github.com/dev-minimalism/oneil-breakout/issues"
+
+[project.scripts]
+oneil-breakout = "oneil_breakout.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+oneil_breakout = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=oneil_breakout --cov-report=term-missing"

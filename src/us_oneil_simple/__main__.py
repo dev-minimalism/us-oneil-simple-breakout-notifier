@@ -2,9 +2,9 @@
 윌리엄 오닐 돌파매매 봇 CLI 진입점 (미국 주식 전용)
 
 사용법:
-    python -m oneil_breakout          # 봇 실행
-    python -m oneil_breakout backtest # 백테스트 실행
-    python -m oneil_breakout scan     # 즉시 스캔 (1회)
+    python -m us_oneil_simple          # 봇 실행
+    python -m us_oneil_simple backtest # 백테스트 실행
+    python -m us_oneil_simple scan     # 즉시 스캔 (1회)
 """
 import argparse
 import sys
@@ -20,9 +20,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 예제:
-    python -m oneil_breakout              # 봇 실행
-    python -m oneil_breakout backtest     # 백테스트 실행
-    python -m oneil_breakout scan         # 즉시 1회 스캔
+    python -m us_oneil_simple              # 봇 실행
+    python -m us_oneil_simple backtest     # 백테스트 실행
+    python -m us_oneil_simple scan         # 즉시 1회 스캔
 """
     )
 

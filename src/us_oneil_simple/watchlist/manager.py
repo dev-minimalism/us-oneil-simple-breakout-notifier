@@ -47,8 +47,8 @@ class WatchlistManager:
         """감시 종목 파일에 저장"""
         try:
             data = {
-                'stocks': self.watchlist,
-                'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'us': self.watchlist,
+                'updated_at': datetime.now().isoformat()
             }
             with open(self.watchlist_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)

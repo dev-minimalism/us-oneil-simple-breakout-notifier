@@ -69,6 +69,23 @@ class WatchlistSettings:
 
 
 @dataclass
+class DatabaseSettings:
+    """PostgreSQL 데이터베이스 설정 (SSH 터널 지원)"""
+    # SSH 터널 설정
+    ssh_host: str = ""
+    ssh_port: int = 22
+    ssh_user: str = ""
+    ssh_key_path: str = "~/.ssh/id_rsa"
+
+    # PostgreSQL 설정
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = ""
+    db_user: str = ""
+    db_password: str = ""
+
+
+@dataclass
 class Settings:
     """전체 설정"""
     telegram: TelegramSettings = field(default_factory=TelegramSettings)
@@ -77,6 +94,7 @@ class Settings:
     scan: ScanSettings = field(default_factory=ScanSettings)
     data: DataSettings = field(default_factory=DataSettings)
     watchlist: WatchlistSettings = field(default_factory=WatchlistSettings)
+    database: DatabaseSettings = field(default_factory=DatabaseSettings)
 
     # 파일 경로
     watchlist_file: str = "watchlist.json"
@@ -136,6 +154,8 @@ def load_settings() -> Settings:
     # 스캔 설정
     if os.environ.get('SCAN_INTERVAL'):
         settings.scan.interval_seconds = int(os.environ['SCAN_INTERVAL'])
+    if os.environ.get('REQUEST_DELAY'):
+        settings.scan.request_delay = float(os.environ['REQUEST_DELAY'])
 
     # 거래 설정
     if os.environ.get('STOP_LOSS_PCT'):
@@ -144,15 +164,67 @@ def load_settings() -> Settings:
         settings.trading.take_profit_pct = float(os.environ['TAKE_PROFIT_PCT'])
     if os.environ.get('MAX_HOLDING_DAYS'):
         settings.trading.max_holding_days = int(os.environ['MAX_HOLDING_DAYS'])
+    if os.environ.get('MAX_POSITIONS'):
+        settings.trading.max_positions = int(os.environ['MAX_POSITIONS'])
+    if os.environ.get('POSITION_SIZE_PCT'):
+        settings.trading.position_size_pct = float(os.environ['POSITION_SIZE_PCT'])
 
-    # 패턴 설정
+    # 패턴 설정 - 피벗 돌파
     if os.environ.get('VOLUME_SURGE_MIN'):
         settings.pattern.volume_surge_min = float(os.environ['VOLUME_SURGE_MIN'])
     if os.environ.get('BREAKOUT_MAX'):
         settings.pattern.breakout_max = float(os.environ['BREAKOUT_MAX'])
 
+    # 패턴 설정 - 컵앤핸들
+    if os.environ.get('CUP_DEPTH_MIN'):
+        settings.pattern.cup_depth_min = float(os.environ['CUP_DEPTH_MIN'])
+    if os.environ.get('CUP_DEPTH_MAX'):
+        settings.pattern.cup_depth_max = float(os.environ['CUP_DEPTH_MAX'])
+    if os.environ.get('HANDLE_DEPTH_MAX'):
+        settings.pattern.handle_depth_max = float(os.environ['HANDLE_DEPTH_MAX'])
+
+    # 패턴 설정 - 베이스 돌파
+    if os.environ.get('BASE_VOLATILITY_MAX'):
+        settings.pattern.base_volatility_max = float(os.environ['BASE_VOLATILITY_MAX'])
+    if os.environ.get('BASE_VOLUME_SURGE_MIN'):
+        settings.pattern.base_volume_surge_min = float(os.environ['BASE_VOLUME_SURGE_MIN'])
+    if os.environ.get('BASE_BREAKOUT_MAX'):
+        settings.pattern.base_breakout_max = float(os.environ['BASE_BREAKOUT_MAX'])
+
     # 데이터 설정
     if os.environ.get('ANALYSIS_PERIOD'):
         settings.data.analysis_period = os.environ['ANALYSIS_PERIOD']
+
+    # 워치리스트 설정 (콤마로 구분된 문자열)
+    if os.environ.get('US_STOCKS'):
+        stocks = [s.strip() for s in os.environ['US_STOCKS'].split(',') if s.strip()]
+        if stocks:
+            settings.watchlist.us_stocks = stocks
+
+    # 파일 경로 설정
+    if os.environ.get('WATCHLIST_FILE'):
+        settings.watchlist_file = os.environ['WATCHLIST_FILE']
+    if os.environ.get('POSITIONS_FILE'):
+        settings.positions_file = os.environ['POSITIONS_FILE']
+
+    # 데이터베이스 설정
+    if os.environ.get('SSH_HOST'):
+        settings.database.ssh_host = os.environ['SSH_HOST']
+    if os.environ.get('SSH_PORT'):
+        settings.database.ssh_port = int(os.environ['SSH_PORT'])
+    if os.environ.get('SSH_USER'):
+        settings.database.ssh_user = os.environ['SSH_USER']
+    if os.environ.get('SSH_KEY_PATH'):
+        settings.database.ssh_key_path = os.environ['SSH_KEY_PATH']
+    if os.environ.get('DB_HOST'):
+        settings.database.db_host = os.environ['DB_HOST']
+    if os.environ.get('DB_PORT'):
+        settings.database.db_port = int(os.environ['DB_PORT'])
+    if os.environ.get('DB_NAME'):
+        settings.database.db_name = os.environ['DB_NAME']
+    if os.environ.get('DB_USER'):
+        settings.database.db_user = os.environ['DB_USER']
+    if os.environ.get('DB_PASSWORD'):
+        settings.database.db_password = os.environ['DB_PASSWORD']
 
     return settings

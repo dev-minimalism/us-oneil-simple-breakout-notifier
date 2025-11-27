@@ -22,12 +22,10 @@ ENV/
 *.swo
 
 # Config (contains sensitive tokens)
-config.py
 .env
 
 # Runtime data
 watchlist.json
-positions.json
 *.csv
 
 # OS

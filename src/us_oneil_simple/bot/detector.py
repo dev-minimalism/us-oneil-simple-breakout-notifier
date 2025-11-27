@@ -176,7 +176,14 @@ class BreakoutDetector:
             reason
         )
         self.telegram.send_message(msg)
-        self.positions.remove(position['ticker'])
+
+        # DB에서 포지션 청산 (close_position 사용)
+        self.positions.close_position(
+            position['ticker'],
+            exit_price,
+            reason,
+            profit_pct
+        )
         print(f"  ❌ 포지션 청산: {position['ticker']} ({reason}) {profit_pct:+.2f}%")
 
     def check_positions(self):
@@ -255,9 +262,27 @@ class BreakoutDetector:
 
                 if stock_signals:
                     for signal in stock_signals:
+                        pattern = signal['pattern']
+
+                        # 중복 알림 방지: 오늘 이미 동일 신호를 보냈는지 확인
+                        if not self.positions.can_send_alert(ticker, pattern):
+                            print(f"⏭️ 중복 (오늘 이미 알림 발송)")
+                            continue
+
                         signals.append(signal)
+
+                        # 알림 발송
                         msg = format_signal_message(signal)
                         self.telegram.send_message(msg)
+
+                        # 알림 기록 저장 (중복 방지용)
+                        self.positions.record_alert(
+                            ticker=ticker,
+                            market='US',
+                            pattern=pattern,
+                            alert_price=signal['current_price'],
+                            signal_data=signal
+                        )
 
                         # 포지션 자동 추가
                         if not self.positions.has_position(ticker):

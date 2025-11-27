@@ -11,6 +11,7 @@
 - **스마트 스캔**: 미국 장중 자동 스캔 (22:00-07:00 KST)
 - **텔레그램 통합**: 명령어로 종목 관리, 실시간 알림
 - **포지션 추적**: 자동 손절(-8%), 익절(+20%), 만료(30일) 알림
+- **PostgreSQL 저장**: SSH 터널을 통한 원격 DB 연결, 중복 알림 방지
 - **백테스트**: 과거 데이터로 전략 성과 검증
 
 ## Installation
@@ -28,36 +29,51 @@ pip install -e .
 
 ### 1. 설정
 
-`config.py` 파일을 생성하고 텔레그램 설정을 입력합니다:
-
-```python
-TELEGRAM_TOKEN = "your_bot_token"
-CHAT_ID = "your_chat_id"
-```
-
-또는 환경변수로 설정:
+`.env.example`을 복사하여 `.env` 파일을 생성하고 설정을 입력합니다:
 
 ```bash
-export TELEGRAM_TOKEN="your_bot_token"
-export TELEGRAM_CHAT_ID="your_chat_id"
+cp .env.example .env
 ```
 
-### 2. 봇 실행
+`.env` 파일 주요 설정:
 
 ```bash
-python -m oneil_breakout
+# 텔레그램 (필수)
+TELEGRAM_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+
+# PostgreSQL (SSH 터널)
+SSH_HOST=your_ssh_host
+SSH_USER=your_ssh_user
+SSH_KEY_PATH=~/.ssh/your_key
+DB_NAME=us_oneil_simple_notifier_db
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
 ```
 
-### 3. 즉시 스캔
+### 2. 데이터베이스 설정
 
 ```bash
-python -m oneil_breakout scan
+python scripts/create_database.py   # DB 및 테이블 생성
+python scripts/test_db_connection.py # 연결 테스트
 ```
 
-### 4. 백테스트
+### 3. 봇 실행
 
 ```bash
-python -m oneil_breakout backtest --capital 100000
+python -m us_oneil_simple
+```
+
+### 4. 즉시 스캔
+
+```bash
+python -m us_oneil_simple scan
+```
+
+### 5. 백테스트
+
+```bash
+python -m us_oneil_simple backtest --capital 100000
 ```
 
 ---
@@ -119,14 +135,14 @@ python -m oneil_breakout backtest --capital 100000
 ### CLI로 실행
 
 ```bash
-python -m oneil_breakout backtest --capital 100000
-python -m oneil_breakout backtest --start 2024-01-01 --end 2024-12-31
+python -m us_oneil_simple backtest --capital 100000
+python -m us_oneil_simple backtest --start 2024-01-01 --end 2024-12-31
 ```
 
 ### Python API로 실행
 
 ```python
-from oneil_breakout import BacktestEngine
+from us_oneil_simple import BacktestEngine
 
 engine = BacktestEngine(initial_capital=100_000)  # USD
 engine.run_portfolio_backtest(
@@ -180,24 +196,37 @@ engine.save_results('backtest_results.csv')
 
 ## Configuration
 
-`config.py` 주요 설정:
+`.env` 파일 주요 설정 (전체 목록은 `.env.example` 참조):
 
-```python
+```bash
 # 텔레그램 (필수)
-TELEGRAM_TOKEN = "your_token"
-CHAT_ID = "your_chat_id"
+TELEGRAM_TOKEN=your_token
+TELEGRAM_CHAT_ID=your_chat_id
+
+# PostgreSQL (SSH 터널)
+SSH_HOST=your_ssh_host
+SSH_USER=your_ssh_user
+SSH_KEY_PATH=~/.ssh/your_key
+DB_NAME=us_oneil_simple_notifier_db
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
 
 # 스캔 설정
-SCAN_INTERVAL = 1800      # 30분 (초)
+SCAN_INTERVAL=1800        # 30분 (초)
 
 # 패턴 감지 설정
-VOLUME_SURGE_MIN = 50     # 최소 거래량 증가율 (%)
-BREAKOUT_MAX = 5          # 최대 돌파율 (%)
-CUP_DEPTH_MIN = 12        # 컵 최소 깊이 (%)
-CUP_DEPTH_MAX = 40        # 컵 최대 깊이 (%)
+VOLUME_SURGE_MIN=50       # 최소 거래량 증가율 (%)
+BREAKOUT_MAX=5            # 최대 돌파율 (%)
+CUP_DEPTH_MIN=12          # 컵 최소 깊이 (%)
+CUP_DEPTH_MAX=40          # 컵 최대 깊이 (%)
 
 # 거래 설정
-STOP_LOSS_PERCENT = -7.5  # 손절 기준 (%)
+STOP_LOSS_PCT=-8.0        # 손절 기준 (%)
+TAKE_PROFIT_PCT=20.0      # 익절 기준 (%)
+MAX_HOLDING_DAYS=30       # 최대 보유 기간 (일)
+
+# 워치리스트 (콤마로 구분)
+US_STOCKS=AAPL,MSFT,NVDA,GOOGL,TSLA
 ```
 
 ---
@@ -205,25 +234,32 @@ STOP_LOSS_PERCENT = -7.5  # 손절 기준 (%)
 ## Project Structure
 
 ```
-oneil-breakout/
-├── src/oneil_breakout/
+us-oneil-simple-breakout-notifier/
+├── src/us_oneil_simple/
 │   ├── __init__.py          # 패키지 진입점
 │   ├── __main__.py          # CLI
 │   ├── bot/detector.py      # 메인 봇 클래스
 │   ├── backtest/engine.py   # 백테스트 엔진
 │   ├── config/settings.py   # 설정 관리
+│   ├── database/            # PostgreSQL 데이터베이스
+│   │   ├── connection.py    # SSH 터널 + DB 연결
+│   │   ├── models.py        # Position, Alert 모델
+│   │   └── repository.py    # Repository 패턴
 │   ├── data/
 │   │   └── us_stock.py      # 미국 주식 데이터
 │   ├── patterns/
 │   │   ├── pivot.py         # 피벗 돌파
 │   │   ├── cup_handle.py    # 컵앤핸들
 │   │   └── base.py          # 베이스 돌파
-│   ├── positions/manager.py # 포지션 관리
+│   ├── positions/manager.py # 포지션 관리 (PostgreSQL)
 │   ├── watchlist/manager.py # 워치리스트 관리
 │   └── telegram/
 │       ├── client.py        # 텔레그램 API
 │       └── formatter.py     # 메시지 포맷
-├── config.py                # 사용자 설정
+├── scripts/
+│   ├── create_database.py   # DB 생성 스크립트
+│   └── test_db_connection.py # DB 연결 테스트
+├── .env.example             # 설정 예제
 ├── pyproject.toml
 ├── requirements.txt
 └── README.md
@@ -234,7 +270,7 @@ oneil-breakout/
 ## Python API
 
 ```python
-from oneil_breakout import (
+from us_oneil_simple import (
     BreakoutDetector,
     BacktestEngine,
     Settings,
@@ -278,11 +314,24 @@ pip install setuptools
 
 ### 너무 많은/잘못된 신호
 
-`config.py`에서 조건 강화:
+`.env`에서 조건 강화:
 
-```python
-VOLUME_SURGE_MIN = 70   # 50 → 70으로 상향
-BREAKOUT_MAX = 3        # 5 → 3으로 하향
+```bash
+VOLUME_SURGE_MIN=70   # 50 → 70으로 상향
+BREAKOUT_MAX=3        # 5 → 3으로 하향
+```
+
+### SSH 터널 연결 실패
+
+1. SSH 키 경로 확인 (`SSH_KEY_PATH`)
+2. SSH 서버 접속 가능 여부 확인
+3. paramiko 버전 확인: `pip install "paramiko<3.5.0"`
+
+### 데이터베이스 연결 실패
+
+```bash
+python scripts/test_db_connection.py  # 연결 테스트
+python scripts/create_database.py     # DB 재생성
 ```
 
 ---

@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-William O'Neil Breakout Trading Bot (윌리엄 오닐 돌파매매 봇) - An automated trading signal detection system that identifies chart breakout patterns (Cup-and-Handle, Pivot Point Breakout, Base Breakout) in both US and Korean stock markets using the CAN SLIM strategy framework.
+William O'Neil Breakout Trading Bot (윌리엄 오닐 돌파매매 봇) - An automated trading signal detection system that identifies chart breakout patterns (Cup-and-Handle, Pivot Point Breakout, Base Breakout) in US stock markets using the CAN SLIM strategy framework.
 
-**Stack:** Python 3.12+, yfinance (US stocks), pykrx (Korean stocks), Telegram Bot API
+**Stack:** Python 3.12+, yfinance (US stocks), PostgreSQL (SSH tunnel), Telegram Bot API
 
 ## Common Commands
 
@@ -14,91 +14,126 @@ William O'Neil Breakout Trading Bot (윌리엄 오닐 돌파매매 봇) - An aut
 # Setup
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .                    # Install as editable package
 
 # Run the main trading bot
-python oneil_breakout_bot_smart_with_positions.py
+python -m us_oneil_simple            # Full bot with Telegram listener
+
+# Run a single scan (no loop)
+python -m us_oneil_simple scan
 
 # Run backtests
-python oneil_backtest.py
-python oneil_backtest_2.py
+python -m us_oneil_simple backtest --capital 100000
+python -m us_oneil_simple backtest --start 2024-01-01 --end 2024-12-31
 
-# Test utilities
-python test_telegram.py    # Validate Telegram bot setup
-python test_kr_stock.py    # Validate Korean stock data fetching
+# Database scripts
+python scripts/create_database.py   # Create PostgreSQL database and tables
+python scripts/test_db_connection.py # Test database connection
+
+# Development tools
+ruff check src/                     # Lint
+black src/                          # Format
+mypy src/                           # Type check
+pytest                              # Run tests
 ```
 
 ## Architecture
 
-### Main Application: `oneil_breakout_bot_smart_with_positions.py`
+### Package Structure (`src/us_oneil_simple/`)
 
-The `SmartUnifiedBreakoutDetector` class is the core component:
+The codebase follows a modular architecture:
 
-- **Watchlist Management:** Dynamic stock lists loaded from `watchlist.json`, modified via Telegram commands (`/add_us`, `/add_kr`, `/remove_us`, `/remove_kr`)
-- **Position Tracking:** Entry/exit tracking with P&L stored in `positions.json`
-- **Pattern Detection:** `detect_pivot_breakout()` identifies resistance breakouts with volume surge
-- **Market Intelligence:** `get_market_status()` returns Korean (09:00-15:30) and US (22:30-06:00 KST) market hours
-- **Threading:** Background Telegram command listener + scan mutex to prevent concurrent scans
+```
+src/us_oneil_simple/
+├── __main__.py          # CLI entry point (run/scan/backtest commands)
+├── bot/detector.py      # BreakoutDetector - main orchestrator class
+├── backtest/engine.py   # BacktestEngine - historical testing
+├── config/settings.py   # Settings dataclasses + load_settings()
+├── database/            # PostgreSQL database (SSH tunnel support)
+│   ├── connection.py    # DatabaseConnection - SSH tunnel + DB connection
+│   ├── models.py        # Position, Alert dataclasses
+│   └── repository.py    # PositionRepository, AlertRepository
+├── data/us_stock.py     # yfinance data fetching
+├── patterns/            # Pattern detection algorithms
+│   ├── pivot.py         # detect_pivot_breakout()
+│   ├── cup_handle.py    # detect_cup_and_handle()
+│   └── base.py          # detect_base_breakout()
+├── positions/manager.py # PositionManager - entry/exit tracking (PostgreSQL backend)
+├── watchlist/manager.py # WatchlistManager - dynamic stock list
+├── telegram/
+│   ├── client.py        # TelegramClient - API wrapper
+│   └── formatter.py     # Message formatting functions
+└── market/status.py     # Market hours detection (US: 22:00-07:00 KST)
+```
+
+### Core Classes
+
+- **`BreakoutDetector`** (`bot/detector.py`): Main orchestrator that ties everything together. Handles Telegram commands, runs scans, manages positions.
+- **`BacktestEngine`** (`backtest/engine.py`): Simulates historical trading with stop-loss/take-profit logic.
+- **`Settings`** (`config/settings.py`): Dataclass hierarchy for all configuration. Loads from `.env` file.
+- **`PositionManager`** (`positions/manager.py`): Tracks open positions in PostgreSQL with automatic stop-loss (-8%), take-profit (+20%), and 30-day expiry.
+- **`DatabaseConnection`** (`database/connection.py`): Manages SSH tunnel and PostgreSQL connection.
+- **`AlertRepository`** (`database/repository.py`): Tracks sent alerts to prevent duplicates (same ticker/pattern/day).
 
 ### Data Flow
 
 ```
-Telegram Commands → SmartUnifiedBreakoutDetector
+Telegram Commands → BreakoutDetector.process_command()
                          ↓
-              Data Retrieval (yfinance/pykrx)
+              Data: get_us_stock_data() (yfinance)
                          ↓
-              Pattern Detection → Signal Found?
-                    ↓                    ↓
-                  YES                   NO
-                   ↓                    ↓
-           Add Position          Log & Skip
-           Send Alert
+              Pattern: detect_pivot_breakout() → Signal?
+                    ↓                              ↓
+                  YES                             NO
+                   ↓                              ↓
+           Check: can_send_alert()?          Skip
                    ↓
-         Periodic Position Check (every 30 min)
+           AlertRepository.add() (prevent duplicates)
+           TelegramClient.send_message()
+           PositionManager.add()
                    ↓
-         Stop-Loss (-8%) / Take-Profit (+20%) / 30-day Expiry
+         Periodic check_positions() (every 30 min)
+                   ↓
+         Exit on: stop-loss / take-profit / 30-day expiry
 ```
 
-### Key Files
+### Configuration
 
-| File | Purpose |
-|------|---------|
-| `oneil_breakout_bot_smart_with_positions.py` | Main live trading bot |
-| `oneil_backtest.py` | Backtesting engine |
-| `config.py` | Configuration (Telegram credentials, thresholds, watchlists) |
-| `watchlist.json` | Runtime dynamic stock list |
-| `positions.json` | Open position tracking (generated at runtime) |
+All settings are loaded from `.env` file via `load_settings()`.
 
-### Configuration (`config.py`)
-
-Critical settings to modify:
-- `TELEGRAM_TOKEN` / `CHAT_ID` - Bot credentials
-- `US_WATCH_LIST` / `KR_WATCH_LIST` - Default watchlists
-- `VOLUME_SURGE_MIN` (50%) - Pivot breakout volume threshold
-- `STOP_LOSS_PERCENT` (-7.5%) - Risk management
+Key environment variables (see `.env.example` for full list):
+- `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID` - Required for Telegram integration
+- `SSH_HOST`, `SSH_USER`, `SSH_KEY_PATH` - SSH tunnel for PostgreSQL
+- `DB_NAME`, `DB_USER`, `DB_PASSWORD` - PostgreSQL credentials
+- `SCAN_INTERVAL` - Scan period in seconds (default: 1800)
+- `STOP_LOSS_PCT`, `TAKE_PROFIT_PCT`, `MAX_HOLDING_DAYS` - Risk management
+- `VOLUME_SURGE_MIN`, `BREAKOUT_MAX` - Pattern detection thresholds
+- `US_STOCKS` - Watchlist (comma-separated)
 
 ### Telegram Commands
 
 ```
-/scan, /scan_kr, /scan_us     - Trigger market scans
-/add_us TICKER, /add_kr CODE  - Add to watchlist
-/remove_us, /remove_kr        - Remove from watchlist
-/list                         - Show watchlist
-/positions                    - Show holdings with P&L
-/close TICKER                 - Close position
-/status                       - Market hours status
+/scan          - Trigger immediate market scan
+/positions     - Show current holdings with P&L
+/close TICKER  - Manually close a position
+/add TICKER    - Add stock to watchlist
+/remove TICKER - Remove from watchlist
+/list          - Show watchlist
+/status        - Show market hours status
+/help          - Show all commands
 ```
 
-## Threading Notes
+## Threading Model
 
-- Main thread: 30-minute scan loop + position checks
-- Background daemon: Telegram polling (2-sec interval)
-- Manual `/scan` commands spawn daemon threads
-- `scan_lock` mutex prevents overlapping scans
+- **Main thread**: 30-minute scan loop (`run()` → `run_smart_scan()`)
+- **Daemon thread**: Telegram polling every 2 seconds (`start_command_listener()`)
+- **On-demand threads**: `/scan` command spawns daemon thread for manual scans
+- **`scan_lock`**: Mutex prevents overlapping scans
 
 ## Adding New Features
 
-- **Telegram command:** Add case to `process_command()` method
-- **New pattern:** Add `detect_*()` method, integrate into `analyze_us_stock()` / `analyze_kr_stock()`
-- **Config option:** Add to `config.py`, read in `main()`
-- **Backtest support:** Implement in `BacktestEngine` class in `oneil_backtest.py`
+- **New Telegram command**: Add case in `BreakoutDetector.process_command()`
+- **New pattern detector**: Add function in `patterns/`, call from `analyze_stock()`
+- **New config option**: Add field to appropriate dataclass in `config/settings.py`, handle in `load_settings()`
+- **New database table**: Add model in `database/models.py`, repository in `database/repository.py`, update `connection.py` init_tables()
+- **Backtest pattern**: Add detection method in `BacktestEngine`, call from `run_backtest()`

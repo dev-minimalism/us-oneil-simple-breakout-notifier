@@ -102,6 +102,12 @@ class BreakoutDetector:
                 return "❌ 사용법: /close [티커]\n예: /close AAPL"
             return self._close_position_command(parts[1].upper())
 
+        elif command == '/trades':
+            return self.positions.format_trades_message()
+
+        elif command == '/stats':
+            return self.positions.format_stats_message()
+
         return None
 
     def _get_help_message(self) -> str:
@@ -116,6 +122,10 @@ class BreakoutDetector:
 /positions - 현재 보유 포지션 보기
 /close [티커] - 포지션 수동 청산
   예: /close AAPL
+
+<b>거래 내역:</b>
+/trades - 최근 거래 내역
+/stats - 거래 통계
 
 <b>종목 관리:</b>
 /add [티커] - 종목 추가

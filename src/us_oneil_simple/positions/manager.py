@@ -267,6 +267,82 @@ class PositionManager:
         return [a.to_dict() for a in alerts]
 
     # ========================================
+    # 거래 내역 및 통계
+    # ========================================
+
+    def get_closed_positions(self, limit: int = 20) -> List[Dict]:
+        """청산된 포지션 조회 (최근 거래 내역)"""
+        positions = self.position_repo.get_closed(limit)
+        return [p.to_dict() for p in positions]
+
+    def get_stats(self) -> Dict:
+        """거래 통계 조회"""
+        return self.position_repo.get_stats()
+
+    def format_trades_message(self, limit: int = 10) -> str:
+        """최근 거래 내역 메시지 포맷팅"""
+        trades = self.get_closed_positions(limit)
+
+        if not trades:
+            return "📜 <b>거래 내역</b>\n\n거래 내역이 없습니다."
+
+        msg = f"📜 <b>최근 거래 내역</b> (최근 {len(trades)}건)\n\n"
+
+        for i, trade in enumerate(trades, 1):
+            ticker = trade['ticker']
+            market_emoji = "🇺🇸" if trade['market'] == 'US' else "🇰🇷"
+
+            profit_pct = trade.get('profit_pct', 0) or 0
+            profit_icon = "✅" if profit_pct > 0 else "❌"
+
+            entry_price = trade.get('entry_price', 0)
+            exit_price = trade.get('exit_price', 0) or 0
+            exit_reason = trade.get('exit_reason', '-')
+
+            exit_date = trade.get('exit_date')
+            if exit_date:
+                if isinstance(exit_date, str):
+                    exit_date_str = exit_date[:10]
+                else:
+                    exit_date_str = exit_date.strftime('%Y-%m-%d')
+            else:
+                exit_date_str = '-'
+
+            msg += f"{i}. {market_emoji} <b>{ticker}</b> {profit_icon}\n"
+            msg += f"   {entry_price:,.2f} → {exit_price:,.2f} ({profit_pct:+.2f}%)\n"
+            msg += f"   {exit_reason} | {exit_date_str}\n\n"
+
+        return msg
+
+    def format_stats_message(self) -> str:
+        """거래 통계 메시지 포맷팅"""
+        stats = self.get_stats()
+
+        if stats['total_trades'] == 0:
+            return "📊 <b>거래 통계</b>\n\n거래 내역이 없습니다."
+
+        win_rate = stats['win_rate']
+        win_icon = "🔥" if win_rate >= 50 else "💪" if win_rate >= 30 else "📉"
+
+        total_profit = stats['total_profit']
+        total_icon = "📈" if total_profit > 0 else "📉"
+
+        msg = f"""📊 <b>거래 통계</b>
+
+<b>전체 성적</b>
+• 총 거래: {stats['total_trades']}건
+• 승/패: {stats['win_count']}승 {stats['loss_count']}패
+• 승률: {win_rate:.1f}% {win_icon}
+
+<b>수익률</b>
+• 평균 수익률: {stats['avg_profit']:+.2f}%
+• 최대 수익: {stats['max_profit']:+.2f}%
+• 최대 손실: {stats['max_loss']:+.2f}%
+• 누적 수익률: {stats['total_profit']:+.2f}% {total_icon}
+"""
+        return msg
+
+    # ========================================
     # 포맷팅
     # ========================================
 

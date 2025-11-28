@@ -102,6 +102,56 @@ class PositionRepository:
         """포지션 삭제 (청산 처리)"""
         return self.close(ticker, 0, '수동 삭제', 0)
 
+    def get_closed(self, limit: int = 20) -> List[Position]:
+        """청산된 포지션 조회 (최근 거래 내역)"""
+        query = """
+            SELECT * FROM positions
+            WHERE status = 'closed'
+            ORDER BY exit_date DESC
+            LIMIT %s
+        """
+        results = self.db.execute(query, (limit,))
+        return [Position.from_dict(dict(r)) for r in results]
+
+    def get_stats(self) -> dict:
+        """거래 통계 조회"""
+        query = """
+            SELECT
+                COUNT(*) as total_trades,
+                COUNT(CASE WHEN profit_pct > 0 THEN 1 END) as win_count,
+                COUNT(CASE WHEN profit_pct <= 0 THEN 1 END) as loss_count,
+                COALESCE(AVG(profit_pct), 0) as avg_profit,
+                COALESCE(MAX(profit_pct), 0) as max_profit,
+                COALESCE(MIN(profit_pct), 0) as max_loss,
+                COALESCE(SUM(profit_pct), 0) as total_profit
+            FROM positions
+            WHERE status = 'closed'
+        """
+        result = self.db.execute_one(query)
+        if result:
+            total = result['total_trades'] or 0
+            wins = result['win_count'] or 0
+            return {
+                'total_trades': total,
+                'win_count': wins,
+                'loss_count': result['loss_count'] or 0,
+                'win_rate': (wins / total * 100) if total > 0 else 0,
+                'avg_profit': float(result['avg_profit'] or 0),
+                'max_profit': float(result['max_profit'] or 0),
+                'max_loss': float(result['max_loss'] or 0),
+                'total_profit': float(result['total_profit'] or 0),
+            }
+        return {
+            'total_trades': 0,
+            'win_count': 0,
+            'loss_count': 0,
+            'win_rate': 0,
+            'avg_profit': 0,
+            'max_profit': 0,
+            'max_loss': 0,
+            'total_profit': 0,
+        }
+
 
 class AlertRepository:
     """알림 기록 Repository (중복 알림 방지)"""

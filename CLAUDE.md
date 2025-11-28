@@ -116,6 +116,8 @@ Key environment variables (see `.env.example` for full list):
 /scan          - Trigger immediate market scan
 /positions     - Show current holdings with P&L
 /close TICKER  - Manually close a position
+/trades        - Show recent trade history
+/stats         - Show trading statistics
 /add TICKER    - Add stock to watchlist
 /remove TICKER - Remove from watchlist
 /list          - Show watchlist

@@ -85,6 +85,8 @@ python -m us_oneil_simple backtest --capital 100000
 | `/scan` | 즉시 스캔 |
 | `/positions` | 현재 포지션 보기 |
 | `/close TICKER` | 포지션 수동 청산 |
+| `/trades` | 최근 거래 내역 |
+| `/stats` | 거래 통계 |
 | `/add TICKER` | 종목 추가 |
 | `/remove TICKER` | 종목 삭제 |
 | `/list` | 감시 종목 목록 |
@@ -98,6 +100,108 @@ python -m us_oneil_simple backtest --capital 100000
 /remove AAPL       → 종목 삭제
 /list              → 감시 종목 확인
 /status            → 시장 상태 확인
+```
+
+---
+
+## Background Execution (nohup)
+
+서버에서 봇을 백그라운드로 실행하는 방법입니다.
+
+### 기본 실행
+
+```bash
+# 백그라운드 실행 (출력을 nohup.out에 저장)
+nohup python -m us_oneil_simple &
+
+# 또는 출력 파일 지정
+nohup python -m us_oneil_simple > bot.log 2>&1 &
+```
+
+### 로그 확인
+
+```bash
+# 실시간 로그 확인
+tail -f bot.log
+
+# 최근 100줄 확인
+tail -100 bot.log
+
+# 에러만 확인
+grep -i error bot.log
+```
+
+### 프로세스 관리
+
+```bash
+# 실행 중인 봇 확인
+ps aux | grep us_oneil_simple
+
+# 프로세스 ID 확인
+pgrep -f us_oneil_simple
+
+# 봇 종료
+pkill -f us_oneil_simple
+
+# 또는 PID로 종료
+kill <PID>
+```
+
+### 재시작 스크립트
+
+`restart.sh` 파일 생성:
+
+```bash
+#!/bin/bash
+pkill -f us_oneil_simple
+sleep 2
+cd /path/to/us-oneil-simple-breakout-notifier
+source .venv/bin/activate
+nohup python -m us_oneil_simple > bot.log 2>&1 &
+echo "Bot restarted. PID: $!"
+```
+
+```bash
+chmod +x restart.sh
+./restart.sh
+```
+
+### systemd 서비스 (권장)
+
+`/etc/systemd/system/us-oneil-bot.service` 파일 생성:
+
+```ini
+[Unit]
+Description=US O'Neil Breakout Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=your_username
+WorkingDirectory=/path/to/us-oneil-simple-breakout-notifier
+Environment=PATH=/path/to/us-oneil-simple-breakout-notifier/.venv/bin
+ExecStart=/path/to/us-oneil-simple-breakout-notifier/.venv/bin/python -m us_oneil_simple
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# 서비스 등록 및 시작
+sudo systemctl daemon-reload
+sudo systemctl enable us-oneil-bot
+sudo systemctl start us-oneil-bot
+
+# 상태 확인
+sudo systemctl status us-oneil-bot
+
+# 로그 확인
+sudo journalctl -u us-oneil-bot -f
+
+# 재시작
+sudo systemctl restart us-oneil-bot
 ```
 
 ---

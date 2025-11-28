@@ -114,8 +114,12 @@ python -m us_oneil_simple backtest --capital 100000
 # 백그라운드 실행 (출력을 nohup.out에 저장)
 nohup python -m us_oneil_simple &
 
-# 또는 출력 파일 지정
+# 출력 파일 지정
 nohup python -m us_oneil_simple > bot.log 2>&1 &
+
+# 날짜별 로그 파일 (권장)
+mkdir -p logs
+nohup python -m us_oneil_simple > logs/bot_$(date +%Y%m%d).log 2>&1 &
 ```
 
 ### 로그 확인
@@ -123,12 +127,16 @@ nohup python -m us_oneil_simple > bot.log 2>&1 &
 ```bash
 # 실시간 로그 확인
 tail -f bot.log
+tail -f logs/bot_$(date +%Y%m%d).log
 
 # 최근 100줄 확인
 tail -100 bot.log
 
 # 에러만 확인
 grep -i error bot.log
+
+# 최신 로그 파일 확인
+ls -lt logs/ | head -5
 ```
 
 ### 프로세스 관리

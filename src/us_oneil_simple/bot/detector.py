@@ -274,7 +274,12 @@ class BreakoutDetector:
                     for signal in stock_signals:
                         pattern = signal['pattern']
 
-                        # 중복 알림 방지: 오늘 이미 동일 신호를 보냈는지 확인
+                        # 중복 알림 방지 1: 이미 포지션 보유 중이면 스킵
+                        if self.positions.has_position(ticker):
+                            print(f"⏭️ 스킵 (이미 포지션 보유 중)")
+                            continue
+
+                        # 중복 알림 방지 2: 오늘 이미 동일 신호를 보냈는지 확인
                         if not self.positions.can_send_alert(ticker, pattern):
                             print(f"⏭️ 중복 (오늘 이미 알림 발송)")
                             continue

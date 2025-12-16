@@ -250,8 +250,12 @@ class BreakoutDetector:
     # 스캔 실행
     # ========================================
 
-    def run_scan(self) -> List[Dict]:
-        """스캔 실행"""
+    def run_scan(self, is_manual: bool = False) -> List[Dict]:
+        """스캔 실행
+
+        Args:
+            is_manual: 수동 스캔 여부 (/scan 명령어로 실행된 경우 True)
+        """
         print(f"\n{'=' * 60}")
         print(f"🔍 스캔 시작")
         print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -316,7 +320,7 @@ class BreakoutDetector:
             except Exception:
                 print(f"❌ 오류")
 
-        self._print_scan_summary(signals)
+        self._print_scan_summary(signals, is_manual)
 
         return signals
 
@@ -346,21 +350,28 @@ class BreakoutDetector:
 
         return self.run_scan()
 
-    def _print_scan_summary(self, signals: List[Dict]):
-        """스캔 결과 요약 출력"""
+    def _print_scan_summary(self, signals: List[Dict], is_manual: bool = False):
+        """스캔 결과 요약 출력
+
+        Args:
+            signals: 발견된 신호 목록
+            is_manual: 수동 스캔 여부 (수동 스캔일 때만 "신호 없음" 텔레그램 알림 전송)
+        """
         if signals:
             print(f"\n📊 {len(signals)}개 신호 발견")
         else:
             print("\n⚪ 신호 없음")
 
-            msg = format_no_signal_message(
-                "스캔",
-                self.watchlist.count(),
-                0,
-                True,
-                False
-            )
-            self.telegram.send_message(msg)
+            # 수동 스캔(/scan)일 때만 "신호 없음" 알림 전송
+            if is_manual:
+                msg = format_no_signal_message(
+                    "스캔",
+                    self.watchlist.count(),
+                    0,
+                    True,
+                    False
+                )
+                self.telegram.send_message(msg)
 
         print(f"\n{'=' * 60}\n")
 
@@ -381,7 +392,7 @@ class BreakoutDetector:
         try:
             self.is_scanning = True
             print(f"\n🔔 수동 스캔 명령어 수신 - 스캔 시작")
-            self.run_scan()
+            self.run_scan(is_manual=True)
             self.telegram.send_message(f"✅ 스캔 완료!")
         except Exception as e:
             print(f"❌ 스캔 중 오류: {e}")

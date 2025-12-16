@@ -12,7 +12,11 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
 from dotenv import load_dotenv
-load_dotenv(project_root / ".env")
+load_dotenv(project_root / ".env", override=True)
+
+# 싱글톤 캐시 초기화
+import us_oneil_simple.database.connection as conn_module
+conn_module._db_instance = None
 
 from us_oneil_simple.database import get_db_connection, PositionRepository, AlertRepository
 

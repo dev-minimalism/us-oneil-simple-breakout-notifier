@@ -293,18 +293,22 @@ class BreakoutDetector:
 
                         signals.append(signal)
 
-                        # 알림 발송
-                        msg = format_signal_message(signal)
-                        self.telegram.send_message(msg)
-
-                        # 알림 기록 저장 (중복 방지용)
-                        self.positions.record_alert(
+                        # 알림 기록 저장 먼저 (중복 방지용) - 실패하면 텔레그램 발송 안함
+                        alert_saved = self.positions.record_alert(
                             ticker=ticker,
                             market='US',
                             pattern=pattern,
                             alert_price=signal['current_price'],
                             signal_data=signal
                         )
+
+                        if not alert_saved:
+                            print(f"⚠️ 알림 저장 실패 - 텔레그램 발송 건너뜀")
+                            continue
+
+                        # 알림 저장 성공 시에만 텔레그램 발송
+                        msg = format_signal_message(signal)
+                        self.telegram.send_message(msg)
 
                         # 포지션 자동 추가
                         if not self.positions.has_position(ticker):

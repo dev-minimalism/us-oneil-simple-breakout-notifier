@@ -11,7 +11,8 @@
 - **스마트 스캔**: 미국 장중 자동 스캔 (22:00-07:00 KST)
 - **텔레그램 통합**: 명령어로 종목 관리, 실시간 알림
 - **포지션 추적**: 자동 손절(-8%), 익절(+20%), 만료(30일) 알림
-- **PostgreSQL 저장**: SSH 터널을 통한 원격 DB 연결, 중복 알림 방지
+- **PostgreSQL 저장**: SSH 터널을 통한 원격 DB 연결, 중복 알림 방지, 스레드 안전
+- **자동 로그 롤링**: 한국 시간 자정 기준 일별 로그 파일 생성 (30일 보관)
 - **백테스트**: 과거 데이터로 전략 성과 검증
 
 ## Installation
@@ -111,31 +112,31 @@ python -m us_oneil_simple backtest --capital 100000
 ### 기본 실행
 
 ```bash
-# 백그라운드 실행 (출력을 nohup.out에 저장)
+# 백그라운드 실행 (권장 - 자동 로그 롤링)
 nohup python -m us_oneil_simple &
-
-# 출력 파일 지정
-nohup python -m us_oneil_simple > bot.log 2>&1 &
-
-# 날짜별 로그 파일 (권장)
-mkdir -p logs
-nohup python -m us_oneil_simple > logs/bot_$(date +%Y%m%d).log 2>&1 &
 ```
+
+로그 파일은 자동으로 `logs/` 디렉토리에 생성됩니다:
+- `logs/bot.log` - 현재 로그
+- `logs/bot.log.20241224` - 이전 날짜 로그 (한국 시간 자정 기준 롤링)
+- 최대 30일치 자동 보관
 
 ### 로그 확인
 
 ```bash
 # 실시간 로그 확인
-tail -f bot.log
-tail -f logs/bot_$(date +%Y%m%d).log
+tail -f logs/bot.log
 
 # 최근 100줄 확인
-tail -100 bot.log
+tail -100 logs/bot.log
 
 # 에러만 확인
-grep -i error bot.log
+grep -i error logs/bot.log
 
-# 최신 로그 파일 확인
+# 특정 날짜 로그 확인
+cat logs/bot.log.20241224
+
+# 최신 로그 파일 목록
 ls -lt logs/ | head -5
 ```
 
@@ -165,7 +166,7 @@ pkill -f us_oneil_simple
 sleep 2
 cd /path/to/us-oneil-simple-breakout-notifier
 source .venv/bin/activate
-nohup python -m us_oneil_simple > bot.log 2>&1 &
+nohup python -m us_oneil_simple &
 echo "Bot restarted. PID: $!"
 ```
 

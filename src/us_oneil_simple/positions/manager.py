@@ -231,9 +231,14 @@ class PositionManager:
             pattern: 패턴명
 
         Returns:
-            알림 발송 가능 여부
+            알림 발송 가능 여부 (DB 오류 시 False 반환하여 중복 방지)
         """
-        return not self.alert_repo.has_alert_today(ticker, pattern)
+        try:
+            return not self.alert_repo.has_alert_today(ticker, pattern)
+        except Exception as e:
+            print(f"  ❌ 알림 중복 체크 DB 오류: {ticker} - {e}")
+            # DB 오류 시 안전하게 False 반환 (중복 발송 방지)
+            return False
 
     def record_alert(
         self,

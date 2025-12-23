@@ -48,10 +48,10 @@ def detect_pivot_breakout(
                 'ticker': ticker,
                 'pattern': '피벗돌파',
                 'market': market,
-                'resistance': resistance,
-                'current_price': current_price,
-                'breakout_pct': round(breakout_pct, 2),
-                'volume_surge': round(volume_surge, 2)
+                'resistance': float(resistance),  # numpy → Python float
+                'current_price': float(current_price),  # numpy → Python float
+                'breakout_pct': float(round(breakout_pct, 2)),
+                'volume_surge': float(round(volume_surge, 2))
             }
 
             if market == 'KR' and stock_name:

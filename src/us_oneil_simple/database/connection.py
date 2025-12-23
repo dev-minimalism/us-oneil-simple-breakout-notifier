@@ -1,5 +1,6 @@
 """PostgreSQL 데이터베이스 연결 (SSH 터널 지원)"""
 import os
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
@@ -39,6 +40,7 @@ class DatabaseConnection:
 
         self._tunnel: SSHTunnelForwarder | None = None
         self._connection: psycopg2.extensions.connection | None = None
+        self._lock = threading.RLock()  # 재진입 가능한 락 (데드락 방지)
 
     def _start_tunnel(self) -> SSHTunnelForwarder:
         """SSH 터널 시작"""
@@ -51,6 +53,7 @@ class DatabaseConnection:
             ssh_pkey=str(self.ssh_key_path),
             remote_bind_address=(self.db_host, self.db_port),
             local_bind_address=('127.0.0.1', 0),  # 자동 포트 할당
+            set_keepalive=30,  # 30초마다 keepalive 패킷 전송 (연결 유지)
         )
         self._tunnel.start()
         print(f"  SSH 터널 연결: {self.ssh_host}:{self.ssh_port} -> localhost:{self._tunnel.local_bind_port}")
@@ -79,8 +82,8 @@ class DatabaseConnection:
         """SSH 터널이 살아있는지 확인"""
         return self._tunnel is not None and self._tunnel.is_active
 
-    def _reconnect(self):
-        """연결 재시도"""
+    def _reconnect_internal(self):
+        """연결 재시도 (내부용 - 락 없이 호출)"""
         print("  🔄 DB 연결 재시도 중...")
 
         # 기존 연결 정리
@@ -102,6 +105,11 @@ class DatabaseConnection:
         # 새로 연결
         return self._connect_internal()
 
+    def _reconnect(self):
+        """연결 재시도 (외부용 - 락 포함)"""
+        with self._lock:
+            return self._reconnect_internal()
+
     def _connect_internal(self) -> psycopg2.extensions.connection:
         """실제 연결 수행"""
         tunnel = self._start_tunnel()
@@ -117,18 +125,19 @@ class DatabaseConnection:
         return self._connection
 
     def connect(self) -> psycopg2.extensions.connection:
-        """데이터베이스 연결 (자동 재연결 지원)"""
-        # 터널과 연결이 모두 살아있으면 기존 연결 반환
-        if self._is_tunnel_alive() and self._is_connection_alive():
-            return self._connection
+        """데이터베이스 연결 (자동 재연결 지원, 스레드 안전)"""
+        with self._lock:
+            # 터널과 연결이 모두 살아있으면 기존 연결 반환
+            if self._is_tunnel_alive() and self._is_connection_alive():
+                return self._connection
 
-        # 터널이 죽었거나 연결이 끊어진 경우 재연결
-        if self._tunnel is not None or self._connection is not None:
-            print("  ⚠️ DB 연결 끊김 감지, 재연결 시도...")
-            return self._reconnect()
+            # 터널이 죽었거나 연결이 끊어진 경우 재연결
+            if self._tunnel is not None or self._connection is not None:
+                print("  ⚠️ DB 연결 끊김 감지, 재연결 시도...")
+                return self._reconnect_internal()
 
-        # 최초 연결
-        return self._connect_internal()
+            # 최초 연결
+            return self._connect_internal()
 
     def close(self):
         """연결 종료"""
@@ -152,28 +161,31 @@ class DatabaseConnection:
         finally:
             cursor.close()
 
-    def _execute_with_retry(self, query: str, params: tuple = None, fetch_one: bool = False, max_retries: int = 2):
-        """쿼리 실행 (연결 끊김 시 재시도)"""
+    def _execute_with_retry(self, query: str, params: tuple = None, fetch_one: bool = False, max_retries: int = 3):
+        """쿼리 실행 (연결 끊김 시 재시도, 스레드 안전)"""
         last_error = None
 
-        for attempt in range(max_retries):
-            try:
-                with self.get_cursor() as cursor:
-                    cursor.execute(query, params)
-                    if cursor.description:
-                        return cursor.fetchone() if fetch_one else cursor.fetchall()
-                    return None if fetch_one else []
-            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
-                last_error = e
-                print(f"  ❌ DB 쿼리 오류 (시도 {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    self._reconnect()
-            except Exception as e:
-                # 연결 오류가 아닌 경우 바로 raise
-                raise e
+        with self._lock:  # 스레드 안전성 보장
+            for attempt in range(max_retries):
+                try:
+                    with self.get_cursor() as cursor:
+                        cursor.execute(query, params)
+                        if cursor.description:
+                            result = cursor.fetchone() if fetch_one else cursor.fetchall()
+                            return result
+                        return None if fetch_one else []
+                except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                    last_error = e
+                    print(f"  ❌ DB 쿼리 오류 (시도 {attempt + 1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        self._reconnect_internal()  # 이미 락 안에 있으므로 내부 메서드 사용
+                except Exception as e:
+                    # 연결 오류가 아닌 경우 바로 raise
+                    print(f"  ❌ DB 예외: {type(e).__name__}: {e}")
+                    raise e
 
-        # 모든 재시도 실패
-        raise last_error
+            # 모든 재시도 실패
+            raise last_error
 
     def execute(self, query: str, params: tuple = None) -> list:
         """쿼리 실행 및 결과 반환 (자동 재연결)"""
@@ -184,59 +196,74 @@ class DatabaseConnection:
         """단일 결과 반환 (자동 재연결)"""
         return self._execute_with_retry(query, params, fetch_one=True)
 
-    def init_tables(self):
-        """테이블 초기화"""
-        with self.get_cursor() as cursor:
-            # positions 테이블
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS positions (
-                    id SERIAL PRIMARY KEY,
-                    ticker VARCHAR(20) NOT NULL,
-                    market VARCHAR(10) NOT NULL DEFAULT 'US',
-                    entry_price DECIMAL(15, 4) NOT NULL,
-                    entry_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    pattern VARCHAR(50) NOT NULL,
-                    stop_loss DECIMAL(15, 4),
-                    take_profit DECIMAL(15, 4),
-                    signal_data JSONB,
-                    status VARCHAR(20) NOT NULL DEFAULT 'open',
-                    exit_price DECIMAL(15, 4),
-                    exit_date TIMESTAMP,
-                    exit_reason VARCHAR(100),
-                    profit_pct DECIMAL(10, 4),
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
+    def init_tables(self, max_retries: int = 3):
+        """테이블 초기화 (재시도 지원)"""
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                with self._lock:
+                    with self.get_cursor() as cursor:
+                        self._create_tables(cursor)
+                return
+            except Exception as e:
+                last_error = e
+                print(f"  ❌ 테이블 초기화 오류 (시도 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    self._reconnect_internal()
+        raise last_error
 
-                CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker);
-                CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
-                CREATE INDEX IF NOT EXISTS idx_positions_entry_date ON positions(entry_date);
+    def _create_tables(self, cursor):
+        """테이블 생성 SQL 실행"""
+        # positions 테이블
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS positions (
+                id SERIAL PRIMARY KEY,
+                ticker VARCHAR(20) NOT NULL,
+                market VARCHAR(10) NOT NULL DEFAULT 'US',
+                entry_price DECIMAL(15, 4) NOT NULL,
+                entry_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                pattern VARCHAR(50) NOT NULL,
+                stop_loss DECIMAL(15, 4),
+                take_profit DECIMAL(15, 4),
+                signal_data JSONB,
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                exit_price DECIMAL(15, 4),
+                exit_date TIMESTAMP,
+                exit_reason VARCHAR(100),
+                profit_pct DECIMAL(10, 4),
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
 
-                -- open 상태일 때만 중복 방지 (partial unique index)
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_ticker_open
-                ON positions(ticker) WHERE status = 'open';
-            """)
+            CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker);
+            CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
+            CREATE INDEX IF NOT EXISTS idx_positions_entry_date ON positions(entry_date);
 
-            # alerts 테이블 (중복 알림 방지용)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS alerts (
-                    id SERIAL PRIMARY KEY,
-                    ticker VARCHAR(20) NOT NULL,
-                    market VARCHAR(10) NOT NULL DEFAULT 'US',
-                    pattern VARCHAR(50) NOT NULL,
-                    alert_date DATE NOT NULL DEFAULT CURRENT_DATE,
-                    alert_price DECIMAL(15, 4) NOT NULL,
-                    signal_data JSONB,
-                    sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(ticker, pattern, alert_date) -- 같은 날 동일 종목/패턴 중복 알림 방지
-                );
+            -- open 상태일 때만 중복 방지 (partial unique index)
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_ticker_open
+            ON positions(ticker) WHERE status = 'open';
+        """)
 
-                CREATE INDEX IF NOT EXISTS idx_alerts_ticker ON alerts(ticker);
-                CREATE INDEX IF NOT EXISTS idx_alerts_alert_date ON alerts(alert_date);
-            """)
+        # alerts 테이블 (중복 알림 방지용)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                id SERIAL PRIMARY KEY,
+                ticker VARCHAR(20) NOT NULL,
+                market VARCHAR(10) NOT NULL DEFAULT 'US',
+                pattern VARCHAR(50) NOT NULL,
+                alert_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                alert_price DECIMAL(15, 4) NOT NULL,
+                signal_data JSONB,
+                sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(ticker, pattern, alert_date) -- 같은 날 동일 종목/패턴 중복 알림 방지
+            );
 
-            print("  테이블 초기화 완료")
+            CREATE INDEX IF NOT EXISTS idx_alerts_ticker ON alerts(ticker);
+            CREATE INDEX IF NOT EXISTS idx_alerts_alert_date ON alerts(alert_date);
+        """)
+
+        print("  테이블 초기화 완료")
 
 
 # 전역 연결 인스턴스 (싱글톤)

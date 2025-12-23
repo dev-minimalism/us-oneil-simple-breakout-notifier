@@ -1,10 +1,29 @@
 """데이터베이스 Repository"""
 import json
 from datetime import datetime, date
-from typing import List
+from typing import List, Any
+
+import numpy as np
 
 from .connection import DatabaseConnection
 from .models import Position, Alert
+
+
+def _convert_numpy_types(obj: Any) -> Any:
+    """numpy 타입을 Python 기본 타입으로 변환 (JSON 직렬화용)"""
+    if isinstance(obj, dict):
+        return {k: _convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_numpy_types(v) for v in obj]
+    elif isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    return obj
 
 
 class PositionRepository:
@@ -28,6 +47,12 @@ class PositionRepository:
         if self.has_position(ticker):
             return None
 
+        # numpy 타입 → Python 기본 타입 변환
+        entry_price = float(entry_price) if entry_price is not None else None
+        stop_loss = float(stop_loss) if stop_loss is not None else None
+        take_profit = float(take_profit) if take_profit is not None else None
+        signal_json = json.dumps(_convert_numpy_types(signal_data)) if signal_data else None
+
         query = """
             INSERT INTO positions (ticker, market, entry_price, pattern, stop_loss, take_profit, signal_data, status)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'open')
@@ -35,7 +60,7 @@ class PositionRepository:
         """
         result = self.db.execute_one(
             query,
-            (ticker, market, entry_price, pattern, stop_loss, take_profit, json.dumps(signal_data) if signal_data else None)
+            (ticker, market, entry_price, pattern, stop_loss, take_profit, signal_json)
         )
         if result:
             return Position.from_dict(dict(result))
@@ -168,29 +193,48 @@ class AlertRepository:
         signal_data: dict | None = None,
     ) -> Alert | None:
         """알림 기록 추가"""
-        query = """
-            INSERT INTO alerts (ticker, market, pattern, alert_date, alert_price, signal_data)
-            VALUES (%s, %s, %s, CURRENT_DATE, %s, %s)
-            ON CONFLICT (ticker, pattern, alert_date) DO NOTHING
-            RETURNING *
-        """
-        result = self.db.execute_one(
-            query,
-            (ticker, market, pattern, alert_price, json.dumps(signal_data) if signal_data else None)
-        )
-        if result:
-            return Alert.from_dict(dict(result))
-        return None
+        try:
+            # numpy 타입 → Python 기본 타입 변환
+            alert_price = float(alert_price) if alert_price is not None else 0.0
+            signal_json = json.dumps(_convert_numpy_types(signal_data)) if signal_data else None
+
+            query = """
+                INSERT INTO alerts (ticker, market, pattern, alert_date, alert_price, signal_data)
+                VALUES (%s, %s, %s, CURRENT_DATE, %s, %s)
+                ON CONFLICT (ticker, pattern, alert_date) DO NOTHING
+                RETURNING *
+            """
+            result = self.db.execute_one(
+                query,
+                (ticker, market, pattern, alert_price, signal_json)
+            )
+            if result:
+                print(f"  ✅ Alert DB 저장 성공: {ticker} ({pattern})")
+                return Alert.from_dict(dict(result))
+            else:
+                # ON CONFLICT로 인해 INSERT가 스킵된 경우 (이미 존재)
+                print(f"  ⚠️ Alert DB 저장 스킵 (이미 존재): {ticker} ({pattern})")
+                return None
+        except Exception as e:
+            print(f"  ❌ Alert DB 저장 예외: {ticker} ({pattern}) - {type(e).__name__}: {e}")
+            raise
 
     def has_alert_today(self, ticker: str, pattern: str) -> bool:
         """오늘 동일 알림이 있는지 확인"""
-        query = """
-            SELECT 1 FROM alerts
-            WHERE ticker = %s AND pattern = %s AND alert_date = CURRENT_DATE
-            LIMIT 1
-        """
-        result = self.db.execute_one(query, (ticker, pattern))
-        return result is not None
+        try:
+            query = """
+                SELECT 1 FROM alerts
+                WHERE ticker = %s AND pattern = %s AND alert_date = CURRENT_DATE
+                LIMIT 1
+            """
+            result = self.db.execute_one(query, (ticker, pattern))
+            has_alert = result is not None
+            if has_alert:
+                print(f"  ℹ️ 오늘 이미 알림 있음: {ticker} ({pattern})")
+            return has_alert
+        except Exception as e:
+            print(f"  ❌ Alert 조회 예외: {ticker} ({pattern}) - {type(e).__name__}: {e}")
+            raise
 
     def get_today_alerts(self) -> List[Alert]:
         """오늘 발송된 모든 알림 조회"""

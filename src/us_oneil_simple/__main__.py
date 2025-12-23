@@ -11,10 +11,14 @@ import sys
 
 from .bot import BreakoutDetector
 from .config import load_settings
+from .config.logging import setup_logging
 
 
 def main():
     """메인 CLI 진입점"""
+    # 로깅 설정 (한국 시간 기준 일별 롤링)
+    setup_logging(log_dir="logs")
+
     parser = argparse.ArgumentParser(
         description="윌리엄 오닐 돌파매매 봇 - 미국 주식 전용 (CAN SLIM)",
         formatter_class=argparse.RawDescriptionHelpFormatter,

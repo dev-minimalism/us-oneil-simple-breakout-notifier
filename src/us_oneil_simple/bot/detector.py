@@ -317,8 +317,8 @@ class BreakoutDetector:
                         time.sleep(1)
                 else:
                     print("⚪")
-            except Exception:
-                print(f"❌ 오류")
+            except Exception as e:
+                print(f"❌ 오류: {e}")
 
         self._print_scan_summary(signals, is_manual)
 

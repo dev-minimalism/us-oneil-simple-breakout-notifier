@@ -65,21 +65,25 @@ class PositionManager:
         stop_loss = entry_price * (1 + self.stop_loss_pct / 100)
         take_profit = entry_price * (1 + self.take_profit_pct / 100)
 
-        position = self.position_repo.add(
-            ticker=ticker,
-            market=market,
-            entry_price=entry_price,
-            pattern=pattern,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            signal_data=signal,
-        )
+        try:
+            position = self.position_repo.add(
+                ticker=ticker,
+                market=market,
+                entry_price=entry_price,
+                pattern=pattern,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                signal_data=signal,
+            )
 
-        if position:
-            print(f"  📝 포지션 추가: {ticker} @ {entry_price}")
-            return position.to_dict()
-        else:
-            print(f"  ⚠️ 포지션 추가 실패 (이미 존재): {ticker}")
+            if position:
+                print(f"  📝 포지션 추가: {ticker} @ {entry_price}")
+                return position.to_dict()
+            else:
+                print(f"  ⚠️ 포지션 추가 실패 (이미 존재): {ticker}")
+                return None
+        except Exception as e:
+            print(f"  ❌ 포지션 DB 저장 오류: {ticker} - {e}")
             return None
 
     def remove(self, ticker: str) -> bool:
@@ -252,14 +256,20 @@ class PositionManager:
         Returns:
             저장 성공 여부
         """
-        alert = self.alert_repo.add(
-            ticker=ticker,
-            market=market,
-            pattern=pattern,
-            alert_price=alert_price,
-            signal_data=signal_data,
-        )
-        return alert is not None
+        try:
+            alert = self.alert_repo.add(
+                ticker=ticker,
+                market=market,
+                pattern=pattern,
+                alert_price=alert_price,
+                signal_data=signal_data,
+            )
+            if alert:
+                print(f"  📝 알림 기록 저장: {ticker} ({pattern})")
+            return alert is not None
+        except Exception as e:
+            print(f"  ❌ 알림 기록 DB 저장 오류: {ticker} - {e}")
+            return False
 
     def get_today_alerts(self) -> List[Dict]:
         """오늘 발송된 모든 알림 조회"""

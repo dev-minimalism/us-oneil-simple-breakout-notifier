@@ -62,11 +62,48 @@ class DatabaseConnection:
             self._tunnel.stop()
             self._tunnel = None
 
-    def connect(self) -> psycopg2.extensions.connection:
-        """데이터베이스 연결"""
-        if self._connection is not None and not self._connection.closed:
-            return self._connection
+    def _is_connection_alive(self) -> bool:
+        """연결이 살아있는지 확인"""
+        if self._connection is None or self._connection.closed:
+            return False
 
+        try:
+            # 간단한 쿼리로 연결 상태 확인
+            with self._connection.cursor() as cur:
+                cur.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
+
+    def _is_tunnel_alive(self) -> bool:
+        """SSH 터널이 살아있는지 확인"""
+        return self._tunnel is not None and self._tunnel.is_active
+
+    def _reconnect(self):
+        """연결 재시도"""
+        print("  🔄 DB 연결 재시도 중...")
+
+        # 기존 연결 정리
+        try:
+            if self._connection is not None:
+                self._connection.close()
+        except Exception:
+            pass
+        self._connection = None
+
+        # 기존 터널 정리
+        try:
+            if self._tunnel is not None:
+                self._tunnel.stop()
+        except Exception:
+            pass
+        self._tunnel = None
+
+        # 새로 연결
+        return self._connect_internal()
+
+    def _connect_internal(self) -> psycopg2.extensions.connection:
+        """실제 연결 수행"""
         tunnel = self._start_tunnel()
 
         self._connection = psycopg2.connect(
@@ -78,6 +115,20 @@ class DatabaseConnection:
         )
         print(f"  PostgreSQL 연결: {self.db_name}")
         return self._connection
+
+    def connect(self) -> psycopg2.extensions.connection:
+        """데이터베이스 연결 (자동 재연결 지원)"""
+        # 터널과 연결이 모두 살아있으면 기존 연결 반환
+        if self._is_tunnel_alive() and self._is_connection_alive():
+            return self._connection
+
+        # 터널이 죽었거나 연결이 끊어진 경우 재연결
+        if self._tunnel is not None or self._connection is not None:
+            print("  ⚠️ DB 연결 끊김 감지, 재연결 시도...")
+            return self._reconnect()
+
+        # 최초 연결
+        return self._connect_internal()
 
     def close(self):
         """연결 종료"""
@@ -101,21 +152,37 @@ class DatabaseConnection:
         finally:
             cursor.close()
 
+    def _execute_with_retry(self, query: str, params: tuple = None, fetch_one: bool = False, max_retries: int = 2):
+        """쿼리 실행 (연결 끊김 시 재시도)"""
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                with self.get_cursor() as cursor:
+                    cursor.execute(query, params)
+                    if cursor.description:
+                        return cursor.fetchone() if fetch_one else cursor.fetchall()
+                    return None if fetch_one else []
+            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                last_error = e
+                print(f"  ❌ DB 쿼리 오류 (시도 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    self._reconnect()
+            except Exception as e:
+                # 연결 오류가 아닌 경우 바로 raise
+                raise e
+
+        # 모든 재시도 실패
+        raise last_error
+
     def execute(self, query: str, params: tuple = None) -> list:
-        """쿼리 실행 및 결과 반환"""
-        with self.get_cursor() as cursor:
-            cursor.execute(query, params)
-            if cursor.description:
-                return cursor.fetchall()
-            return []
+        """쿼리 실행 및 결과 반환 (자동 재연결)"""
+        result = self._execute_with_retry(query, params, fetch_one=False)
+        return result if result else []
 
     def execute_one(self, query: str, params: tuple = None) -> dict | None:
-        """단일 결과 반환"""
-        with self.get_cursor() as cursor:
-            cursor.execute(query, params)
-            if cursor.description:
-                return cursor.fetchone()
-            return None
+        """단일 결과 반환 (자동 재연결)"""
+        return self._execute_with_retry(query, params, fetch_one=True)
 
     def init_tables(self):
         """테이블 초기화"""

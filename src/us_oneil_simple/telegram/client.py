@@ -1,7 +1,15 @@
 """텔레그램 클라이언트"""
+import json
 import time
 import requests
 from requests.exceptions import RequestException, Timeout, ConnectionError
+
+
+# 기본 Reply Keyboard 레이아웃
+DEFAULT_KEYBOARD = [
+    ["/scan", "/positions", "/list"],
+    ["/trades", "/stats", "/help"],
+]
 
 
 class TelegramClient:
@@ -55,12 +63,13 @@ class TelegramClient:
 
         return None
 
-    def send_message(self, message: str) -> bool:
+    def send_message(self, message: str, with_keyboard: bool = False) -> bool:
         """
         텔레그램으로 메시지 전송
 
         Args:
             message: 전송할 메시지 (HTML 지원)
+            with_keyboard: Reply Keyboard 표시 여부
 
         Returns:
             전송 성공 여부
@@ -70,6 +79,14 @@ class TelegramClient:
             'text': message,
             'parse_mode': 'HTML'
         }
+
+        if with_keyboard:
+            payload['reply_markup'] = json.dumps({
+                'keyboard': DEFAULT_KEYBOARD,
+                'resize_keyboard': True,  # 버튼 크기 자동 조절
+                'is_persistent': True,    # 항상 표시
+            })
+
         response = self._retry_request(
             'post',
             f"{self.base_url}/sendMessage",

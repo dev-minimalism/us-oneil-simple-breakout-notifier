@@ -7,7 +7,12 @@ from typing import Dict, List
 from ..config import Settings, load_settings
 from ..data.us_stock import get_us_stock_data
 from ..patterns.pivot import detect_pivot_breakout
-from ..market.status import get_market_status, format_market_status_message
+from ..market.status import (
+    get_market_status,
+    format_market_status_message,
+    get_next_scan_time,
+    get_seconds_until_next_scan,
+)
 from ..positions import PositionManager
 from ..watchlist import WatchlistManager
 from ..telegram.client import TelegramClient
@@ -113,15 +118,15 @@ class BreakoutDetector:
     def _get_help_message(self) -> str:
         """도움말 메시지"""
         return """
-🤖 <b>윌리엄 오닐 돌파매매 봇 (미국 주식)</b>
+🤖 <b>윌리엄 오닐 돌파매매 봇</b>
 
 <b>스캔:</b>
 /scan - 즉시 스캔
+/status - 시장 상태 확인
 
 <b>포지션 관리:</b>
 /positions - 현재 보유 포지션 보기
 /close [티커] - 포지션 수동 청산
-  예: /close AAPL
 
 <b>거래 내역:</b>
 /trades - 최근 거래 내역
@@ -129,19 +134,17 @@ class BreakoutDetector:
 
 <b>종목 관리:</b>
 /add [티커] - 종목 추가
-  예: /add AAPL
-
 /remove [티커] - 종목 삭제
-  예: /remove AAPL
-
 /list - 현재 감시 종목 보기
 
-/status - 시장 상태 확인
+<b>시장 시간 (KST):</b>
+🌅 데이마켓: 10:00~17:50
+🌆 프리마켓: 18:00~23:30
+🏛️ 정규장: 23:30~06:00
+🌙 애프터마켓: 06:00~09:50
 
-<b>팁:</b>
-• 매수 신호 발생 시 자동으로 포지션 추적
-• 손절(-8%), 익절(+20%), 30일 만료 시 알림
-• 미국 장중 (22:00-07:00 KST) 자동 스캔
+<b>스캔 스케줄:</b>
+• 매시간 :02, :32 자동 스캔
 """
 
     def _close_position_command(self, ticker: str) -> str:
@@ -337,12 +340,13 @@ class BreakoutDetector:
         print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
         if not market_status['is_open']:
-            print("⏸️  휴장 시간입니다. 다음 장 시작까지 대기...")
+            print(f"{market_status['session_emoji']} {market_status['session_name']}")
             print(f"{'=' * 60}\n")
-            self.check_positions()
             return []
 
-        print(f"🇺🇸 미국 장중 - 스캔 시작 ({self.watchlist.count()}개)")
+        session_emoji = market_status['session_emoji']
+        session_name = market_status['session_name']
+        print(f"{session_emoji} {session_name} - 스캔 시작 ({self.watchlist.count()}개)")
         print(f"{'=' * 60}\n")
 
         # 먼저 포지션 추적
@@ -443,55 +447,62 @@ class BreakoutDetector:
     def get_start_message(self) -> str:
         """시작 메시지 생성"""
         market_status = get_market_status()
-        status_text = "🇺🇸 미국 장중" if market_status['is_open'] else "⏸️  휴장 중"
+        session_emoji = market_status['session_emoji']
+        session_name = market_status['session_name']
 
-        interval_min = self.settings.scan.interval_seconds // 60
+        next_scan = get_next_scan_time()
+        next_scan_str = next_scan.strftime('%H:%M')
 
         return f"""
-🤖 <b>윌리엄 오닐 돌파매매 봇 시작 (미국 주식)</b>
+🤖 <b>윌리엄 오닐 돌파매매 봇 시작</b>
 
 📊 감시 종목: {self.watchlist.count()}개
 📍 현재 포지션: {self.positions.count()}개
 
-⏰ 스캔 주기: {interval_min}분
-🕐 현재 상태: {status_text}
+🕐 현재 상태: {session_emoji} {session_name}
+⏭️ 다음 스캔: {next_scan_str}
 
-📈 자동 스캔:
-   • 미국 장중 (22:00-07:00 KST)
+📈 <b>시장 시간 (KST)</b>
+   🌅 데이마켓: 10:00~17:50
+   🌆 프리마켓: 18:00~23:30
+   🏛️ 정규장: 23:30~06:00
+   🌙 애프터마켓: 06:00~09:50
+
+⏰ 스캔 스케줄: 매시간 :02, :32
 
 🎯 자동 포지션 추적:
-   • 매수 신호 시 자동 기록
-   • 손절({self.settings.trading.stop_loss_pct}%), 익절(+{self.settings.trading.take_profit_pct}%), {self.settings.trading.max_holding_days}일 만료 알림
+   • 손절({self.settings.trading.stop_loss_pct}%), 익절(+{self.settings.trading.take_profit_pct}%)
+   • {self.settings.trading.max_holding_days}일 만료 알림
 
-💬 명령어:
-   /scan - 즉시 스캔
-   /positions - 현재 포지션 보기
-   /help - 전체 명령어 보기
-
-시작 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+시작: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
 
     def run(self):
-        """메인 실행 루프"""
+        """메인 실행 루프 (매시간 :02, :32에 스캔)"""
         # 텔레그램 명령어 리스너 시작
         self.start_command_listener()
 
-        # 시작 메시지
+        # 시작 메시지 (키보드 버튼 포함)
         start_msg = self.get_start_message()
-        self.telegram.send_message(start_msg)
+        self.telegram.send_message(start_msg, with_keyboard=True)
         print(start_msg)
-
-        scan_interval = self.settings.scan.interval_seconds
 
         try:
             while True:
+                # 다음 스캔 시간까지 대기
+                wait_seconds = get_seconds_until_next_scan()
+                next_scan = get_next_scan_time()
+
+                if wait_seconds > 0:
+                    print(f"⏰ 다음 스캔: {next_scan.strftime('%Y-%m-%d %H:%M:%S')}")
+                    print(f"💤 {wait_seconds // 60}분 {wait_seconds % 60}초 대기 중...\n")
+                    time.sleep(wait_seconds)
+
+                # 스캔 실행
                 self.run_smart_scan()
 
-                # 다음 스캔까지 대기
-                next_scan = datetime.now() + timedelta(seconds=scan_interval)
-                print(f"⏰ 다음 스캔: {next_scan.strftime('%Y-%m-%d %H:%M:%S')}")
-                print(f"💤 {scan_interval // 60}분 대기 중...\n")
-                time.sleep(scan_interval)
+                # 스캔 직후 1초 대기 (다음 스캔 시간 계산을 위해)
+                time.sleep(1)
 
         except KeyboardInterrupt:
             print("\n\n⛔ 프로그램 종료")

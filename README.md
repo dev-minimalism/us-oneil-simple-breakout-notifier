@@ -113,7 +113,7 @@ python -m us_oneil_simple backtest --capital 100000
 
 ```bash
 # 백그라운드 실행 (권장 - 자동 로그 롤링)
-nohup python -m us_oneil_simple &
+nohup python -m us_oneil_simple > /dev/null 2>&1 &
 ```
 
 로그 파일은 자동으로 `logs/` 디렉토리에 생성됩니다:
@@ -166,7 +166,7 @@ pkill -f us_oneil_simple
 sleep 2
 cd /path/to/us-oneil-simple-breakout-notifier
 source .venv/bin/activate
-nohup python -m us_oneil_simple &
+nohup python -m us_oneil_simple > /dev/null 2>&1 &
 echo "Bot restarted. PID: $!"
 ```
 

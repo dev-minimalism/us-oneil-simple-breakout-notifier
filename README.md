@@ -464,7 +464,7 @@ MIT License
 
 ## Author
 
-Yungoo Park (ygpark@lendingmachine.co.kr)
+Yungoo Park (developer.ygpark@gmail.com)
 
 ## References
 

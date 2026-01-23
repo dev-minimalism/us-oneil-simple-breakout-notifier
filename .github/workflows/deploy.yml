@@ -34,7 +34,7 @@ jobs:
             # 2. 최신 코드 가져오기
             echo ">>> Git pull..."
             git fetch origin
-            git reset --hard origin/main
+            git reset --hard origin/develop
 
             # 3. 가상환경 활성화 및 의존성 설치
             echo ">>> 의존성 설치..."

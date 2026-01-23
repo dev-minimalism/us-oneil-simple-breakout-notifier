@@ -11,45 +11,51 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy via SSH
+      - name: Stop existing process
+        uses: appleboy/ssh-action@v1.0.3
+        continue-on-error: true
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            echo ">>> 기존 프로세스 종료 중..."
+            pkill -f "python.*us_oneil_simple" || echo "실행 중인 프로세스 없음"
+
+      - name: Wait for process to stop
+        run: sleep 3
+
+      - name: Deploy and start bot
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          script_stop: false
           script: |
             set -e
-
-            # 프로젝트 경로
             cd /home/${{ secrets.SSH_USER }}/code/us-oneil-simple-breakout-notifier
 
             echo "=== 배포 시작: $(date) ==="
 
-            # 1. 기존 프로세스 종료
-            echo ">>> 기존 프로세스 종료 중..."
-            pkill -f "python.*us_oneil_simple" || echo "실행 중인 프로세스 없음"
-            sleep 2
-
-            # 2. 최신 코드 가져오기
+            # 1. 최신 코드 가져오기
             echo ">>> Git pull..."
             git fetch origin
             git reset --hard origin/develop
 
-            # 3. 가상환경 활성화 및 의존성 설치
+            # 2. 가상환경 활성화 및 의존성 설치
             echo ">>> 의존성 설치..."
             source .venv/bin/activate
             pip install -e . --quiet
 
-            # 4. 봇 시작
+            # 3. 봇 시작
             echo ">>> 봇 시작..."
             mkdir -p logs
             setsid nohup python -u -m us_oneil_simple > logs/bot_$(date +%Y%m%d).log 2>&1 &
-            disown
             sleep 3
 
-            # 5. 실행 확인
+            # 4. 실행 확인
             if pgrep -f "python.*us_oneil_simple" > /dev/null; then
               echo ">>> 봇 시작 완료! PID: $(pgrep -f 'python.*us_oneil_simple')"
             else

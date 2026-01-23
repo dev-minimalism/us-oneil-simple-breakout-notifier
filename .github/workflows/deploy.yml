@@ -43,7 +43,8 @@ jobs:
 
             # 4. 봇 시작
             echo ">>> 봇 시작..."
-            nohup python -m us_oneil_simple > /dev/null 2>&1 &
+            mkdir -p logs
+            nohup python -u -m us_oneil_simple > logs/bot_$(date +%Y%m%d).log 2>&1 &
             sleep 3
 
             # 5. 실행 확인

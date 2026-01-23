@@ -112,29 +112,22 @@ python -m us_oneil_simple backtest --capital 100000
 ### 기본 실행
 
 ```bash
-# 백그라운드 실행 (권장 - 자동 로그 롤링)
-nohup python -m us_oneil_simple > /dev/null 2>&1 &
+# 백그라운드 실행 (날짜별 로그 파일)
+mkdir -p logs
+nohup python -u -m us_oneil_simple > logs/bot_$(date +%Y%m%d).log 2>&1 &
 ```
-
-로그 파일은 자동으로 `logs/` 디렉토리에 생성됩니다:
-- `logs/bot.log` - 현재 로그
-- `logs/bot.log.20241224` - 이전 날짜 로그 (한국 시간 자정 기준 롤링)
-- 최대 30일치 자동 보관
 
 ### 로그 확인
 
 ```bash
 # 실시간 로그 확인
-tail -f logs/bot.log
+tail -f logs/bot_$(date +%Y%m%d).log
 
 # 최근 100줄 확인
-tail -100 logs/bot.log
+tail -100 logs/bot_$(date +%Y%m%d).log
 
 # 에러만 확인
-grep -i error logs/bot.log
-
-# 특정 날짜 로그 확인
-cat logs/bot.log.20241224
+grep -i error logs/bot_*.log
 
 # 최신 로그 파일 목록
 ls -lt logs/ | head -5
@@ -166,7 +159,8 @@ pkill -f us_oneil_simple
 sleep 2
 cd /path/to/us-oneil-simple-breakout-notifier
 source .venv/bin/activate
-nohup python -m us_oneil_simple > /dev/null 2>&1 &
+mkdir -p logs
+nohup python -u -m us_oneil_simple > logs/bot_$(date +%Y%m%d).log 2>&1 &
 echo "Bot restarted. PID: $!"
 ```
 

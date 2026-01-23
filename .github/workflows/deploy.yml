@@ -1,0 +1,57 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # 수동 실행 가능
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+
+            # 프로젝트 경로
+            cd /home/${{ secrets.SSH_USER }}/code/us-oneil-simple-breakout-notifier
+
+            echo "=== 배포 시작: $(date) ==="
+
+            # 1. 기존 프로세스 종료
+            echo ">>> 기존 프로세스 종료 중..."
+            pkill -f "python.*us_oneil_simple" || echo "실행 중인 프로세스 없음"
+            sleep 2
+
+            # 2. 최신 코드 가져오기
+            echo ">>> Git pull..."
+            git fetch origin
+            git reset --hard origin/main
+
+            # 3. 가상환경 활성화 및 의존성 설치
+            echo ">>> 의존성 설치..."
+            source .venv/bin/activate
+            pip install -e . --quiet
+
+            # 4. 봇 시작
+            echo ">>> 봇 시작..."
+            nohup python -m us_oneil_simple > /dev/null 2>&1 &
+            sleep 3
+
+            # 5. 실행 확인
+            if pgrep -f "python.*us_oneil_simple" > /dev/null; then
+              echo ">>> 봇 시작 완료! PID: $(pgrep -f 'python.*us_oneil_simple')"
+            else
+              echo ">>> 봇 시작 실패!"
+              exit 1
+            fi
+
+            echo "=== 배포 완료: $(date) ==="

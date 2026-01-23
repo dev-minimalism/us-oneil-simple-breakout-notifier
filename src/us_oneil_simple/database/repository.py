@@ -109,7 +109,11 @@ class PositionRepository:
         exit_reason: str,
         profit_pct: float,
     ) -> bool:
-        """포지션 청산"""
+        """포지션 청산
+
+        Returns:
+            청산 성공 여부 (실제 업데이트된 행이 있으면 True)
+        """
         query = """
             UPDATE positions
             SET status = 'closed',
@@ -119,9 +123,15 @@ class PositionRepository:
                 profit_pct = %s,
                 updated_at = CURRENT_TIMESTAMP
             WHERE ticker = %s AND status = 'open'
+            RETURNING id
         """
-        self.db.execute(query, (exit_price, exit_reason, profit_pct, ticker))
-        return True
+        result = self.db.execute_one(query, (exit_price, exit_reason, profit_pct, ticker))
+        success = result is not None
+        if success:
+            print(f"  ✅ 포지션 DB 청산 성공: {ticker}")
+        else:
+            print(f"  ❌ 포지션 DB 청산 실패 (open 포지션 없음): {ticker}")
+        return success
 
     def remove(self, ticker: str) -> bool:
         """포지션 삭제 (청산 처리)"""

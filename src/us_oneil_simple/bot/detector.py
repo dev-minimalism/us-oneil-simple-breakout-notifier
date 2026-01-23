@@ -156,8 +156,11 @@ class BreakoutDetector:
         try:
             current_price = self._get_current_price(ticker, 'US')
             if current_price:
-                self._close_position(pos, current_price, "수동 청산")
-                return f"✅ {ticker} 포지션이 청산되었습니다."
+                success = self._close_position(pos, current_price, "수동 청산")
+                if success:
+                    return f"✅ {ticker} 포지션이 청산되었습니다."
+                else:
+                    return f"❌ {ticker} 포지션 청산 실패 (DB 업데이트 오류)"
             else:
                 return f"❌ {ticker} 현재가 조회 실패"
         except Exception as e:
@@ -174,12 +177,30 @@ class BreakoutDetector:
     # 포지션 관리
     # ========================================
 
-    def _close_position(self, position: Dict, exit_price: float, reason: str):
-        """포지션 청산 처리"""
+    def _close_position(self, position: Dict, exit_price: float, reason: str) -> bool:
+        """포지션 청산 처리
+
+        Returns:
+            청산 성공 여부
+        """
+        ticker = position['ticker']
         profit_pct, holding_days = self.positions.calculate_profit(position, exit_price)
 
+        # DB에서 포지션 청산 먼저 시도 (성공해야 텔레그램 발송)
+        success = self.positions.close_position(
+            ticker,
+            exit_price,
+            reason,
+            profit_pct
+        )
+
+        if not success:
+            print(f"  ⚠️ 포지션 청산 실패 (DB 업데이트 안됨): {ticker}")
+            return False
+
+        # DB 청산 성공 후 텔레그램 발송
         msg = format_close_position_message(
-            position['ticker'],
+            ticker,
             'US',
             position['pattern'],
             position['entry_price'],
@@ -189,15 +210,8 @@ class BreakoutDetector:
             reason
         )
         self.telegram.send_message(msg)
-
-        # DB에서 포지션 청산 (close_position 사용)
-        self.positions.close_position(
-            position['ticker'],
-            exit_price,
-            reason,
-            profit_pct
-        )
-        print(f"  ❌ 포지션 청산: {position['ticker']} ({reason}) {profit_pct:+.2f}%")
+        print(f"  ❌ 포지션 청산 완료: {ticker} ({reason}) {profit_pct:+.2f}%")
+        return True
 
     def check_positions(self):
         """포지션 추적 및 청산 조건 확인"""

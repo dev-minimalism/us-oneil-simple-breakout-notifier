@@ -135,7 +135,14 @@ Key environment variables (see `.env.example` for full list):
 ## Adding New Features
 
 - **New Telegram command**: Add case in `BreakoutDetector.process_command()`
-- **New pattern detector**: Add function in `patterns/`, call from `analyze_stock()`
+- **New pattern detector**: Add function in `patterns/`, call from `analyze_stock()`. Pattern detectors are pure functions taking OHLCV DataFrame + thresholds.
 - **New config option**: Add field to appropriate dataclass in `config/settings.py`, handle in `load_settings()`
 - **New database table**: Add model in `database/models.py`, repository in `database/repository.py`, update `connection.py` init_tables()
 - **Backtest pattern**: Add detection method in `BacktestEngine`, call from `run_backtest()`
+
+## Key Implementation Details
+
+- **Database connection**: Uses SSH tunnel with auto-reconnect. Thread-safe via `RLock()`. Keepalive every 30 seconds.
+- **Alert deduplication**: `AlertRepository.can_send_alert()` prevents same ticker/pattern alerts on the same day.
+- **Market hours**: US regular session is 22:00-07:00 KST (next day). Smart scan only runs during market hours.
+- **Exit conditions**: Positions auto-close on stop-loss (-8%), take-profit (+20%), or 30-day expiry.

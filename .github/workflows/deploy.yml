@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Stop existing process
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
         continue-on-error: true
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -27,7 +27,7 @@ jobs:
         run: sleep 3
 
       - name: Deploy and start bot
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}

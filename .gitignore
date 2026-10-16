@@ -21,12 +21,37 @@ ENV/
 *.swp
 *.swo
 
-# Config (contains sensitive tokens)
+# AI assistant local state (per-machine permissions, session memory)
+.claude/settings.local.json
+.remember/
+
+# Config (contains sensitive tokens) - keep only .env.example
 .env
+.env.*
+!.env.example
+
+# SSH keys / certificates (SSH_KEY_PATH may point here)
+*.pem
+*.key
+*.ppk
+id_rsa*
+id_ed25519*
 
 # Runtime data
 watchlist.json
+positions.json
 *.csv
+
+# Local ops scripts (server paths, usernames)
+restart.sh
+
+# Tooling caches / coverage
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
 
 # OS
 .DS_Store
@@ -35,3 +60,4 @@ Thumbs.db
 # Logs
 *.log
 /logs/
+nohup.out

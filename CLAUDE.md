@@ -4,145 +4,110 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-William O'Neil Breakout Trading Bot (윌리엄 오닐 돌파매매 봇) - An automated trading signal detection system that identifies chart breakout patterns (Cup-and-Handle, Pivot Point Breakout, Base Breakout) in US stock markets using the CAN SLIM strategy framework.
+William O'Neil Breakout Trading Bot (윌리엄 오닐 돌파매매 봇) - a Telegram signal bot that scans a US stock watchlist for breakout patterns (CAN SLIM) and tracks paper positions in PostgreSQL. It never places orders.
 
-**Stack:** Python 3.12+, yfinance (US stocks), PostgreSQL (SSH tunnel), Telegram Bot API
+Everything user-facing is Korean: Telegram messages, log output, docstrings, comments, and commit messages (`fix:`, `feat:`, `docs:`, `chore:` prefixes). Keep that convention.
+
+**Stack:** Python 3.12+, yfinance, PostgreSQL over an SSH tunnel (`sshtunnel` + `psycopg2`), Telegram Bot API called directly with `requests` (no bot framework).
 
 ## Common Commands
 
 ```bash
-# Setup
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .                    # Install as editable package
+python -m venv .venv && source .venv/bin/activate
+pip install -e .                      # pyproject.toml is canonical; requirements.txt is stale
+pip install -e ".[dev]"               # ruff / black / mypy / pytest (not installed by default)
 
-# Run the main trading bot
-python -m us_oneil_simple            # Full bot with Telegram listener
+python -m us_oneil_simple             # Full bot: Telegram listener + scheduled scans
+python -m us_oneil_simple scan        # One scan, then exit
+python -m us_oneil_simple backtest --capital 100000 --start 2024-01-01 --end 2024-12-31
 
-# Run a single scan (no loop)
-python -m us_oneil_simple scan
+python scripts/create_database.py     # Create DB + tables through the SSH tunnel
+python scripts/test_db_connection.py  # Verify tunnel + DB
+python scripts/test_close_position.py # Exercises close logic against the REAL DB (rolls back)
 
-# Run backtests
-python -m us_oneil_simple backtest --capital 100000
-python -m us_oneil_simple backtest --start 2024-01-01 --end 2024-12-31
-
-# Database scripts
-python scripts/create_database.py   # Create PostgreSQL database and tables
-python scripts/test_db_connection.py # Test database connection
-
-# Development tools
-ruff check src/                     # Lint
-black src/                          # Format
-mypy src/                           # Type check
-pytest                              # Run tests
+ruff check src/ && black src/ && mypy src/
+pytest                                # Configured (testpaths=tests) but no tests/ directory exists yet
 ```
+
+**What each command needs:** `run` and `scan` both construct `PositionManager`, which opens the SSH tunnel and calls `init_tables()` immediately. Neither can start without a `.env` and reachable PostgreSQL. `run` additionally exits if `TELEGRAM_TOKEN` is unset. `backtest` needs neither DB nor Telegram, only yfinance.
+
+The `scripts/test_*.py` files are manual DB checks, not pytest tests.
+
+## Deployment
+
+Pushing to `develop` triggers `.github/workflows/deploy.yml`: it SSHes to the server, `pkill`s the running bot, does `git reset --hard origin/develop`, `pip install -e .`, and restarts with `setsid nohup .venv/bin/python3 -u -m us_oneil_simple`. **`develop` is the production branch.** `main` is the PR target. Every restart sends a "bot started" Telegram message.
 
 ## Architecture
 
-### Package Structure (`src/us_oneil_simple/`)
-
-The codebase follows a modular architecture:
+### Package map (`src/us_oneil_simple/`)
 
 ```
-src/us_oneil_simple/
-├── __main__.py          # CLI entry point (run/scan/backtest commands)
-├── bot/detector.py      # BreakoutDetector - main orchestrator class
-├── backtest/engine.py   # BacktestEngine - historical testing
-├── config/settings.py   # Settings dataclasses + load_settings()
-├── database/            # PostgreSQL database (SSH tunnel support)
-│   ├── connection.py    # DatabaseConnection - SSH tunnel + DB connection
-│   ├── models.py        # Position, Alert dataclasses
-│   └── repository.py    # PositionRepository, AlertRepository
-├── data/us_stock.py     # yfinance data fetching
-├── patterns/            # Pattern detection algorithms
-│   ├── pivot.py         # detect_pivot_breakout()
-│   ├── cup_handle.py    # detect_cup_and_handle()
-│   └── base.py          # detect_base_breakout()
-├── positions/manager.py # PositionManager - entry/exit tracking (PostgreSQL backend)
-├── watchlist/manager.py # WatchlistManager - dynamic stock list
-├── telegram/
-│   ├── client.py        # TelegramClient - API wrapper
-│   └── formatter.py     # Message formatting functions
-└── market/status.py     # Market hours detection (US: 22:00-07:00 KST)
+__main__.py            CLI; calls setup_logging() first, then dispatches run / scan / backtest
+bot/detector.py        BreakoutDetector: Telegram commands, scan loop, position exit checks
+backtest/engine.py     BacktestEngine: standalone, no DB or Telegram
+config/settings.py     Settings dataclasses + load_settings() (.env -> os.environ -> dataclass)
+config/logging.py      KST daily-rolling file log; redirects sys.stdout/stderr into logging
+database/              DatabaseConnection (tunnel + RLock + retry), Position/Alert models, repositories
+data/us_stock.py       yfinance fetchers (by period, by date range)
+patterns/              pivot.py (live + backtest); cup_handle.py, base.py (backtest-style only)
+positions/manager.py   PositionManager: PostgreSQL-backed positions + alert dedupe
+watchlist/manager.py   WatchlistManager: file-backed (watchlist.json in the working directory)
+market/status.py       Session detection + fixed :02/:32 scan schedule
+telegram/              TelegramClient (requests + retry/backoff), message formatters
 ```
 
-### Core Classes
+### Scan loop and scheduling
 
-- **`BreakoutDetector`** (`bot/detector.py`): Main orchestrator that ties everything together. Handles Telegram commands, runs scans, manages positions.
-- **`BacktestEngine`** (`backtest/engine.py`): Simulates historical trading with stop-loss/take-profit logic.
-- **`Settings`** (`config/settings.py`): Dataclass hierarchy for all configuration. Loads from `.env` file.
-- **`PositionManager`** (`positions/manager.py`): Tracks open positions in PostgreSQL with automatic stop-loss (-8%), take-profit (+20%), and 30-day expiry.
-- **`DatabaseConnection`** (`database/connection.py`): Manages SSH tunnel and PostgreSQL connection.
-- **`AlertRepository`** (`database/repository.py`): Tracks sent alerts to prevent duplicates (same ticker/pattern/day).
+- `run()` sleeps until the next `:02` or `:32` minute mark (`market/status.get_next_scan_time`) and then calls `run_smart_scan()`. `SCAN_INTERVAL` and `REQUEST_DELAY` are parsed into `settings.scan` but **nothing reads them**.
+- `run_smart_scan()`: skip if a manual scan is running -> skip if market closed -> `check_positions()` (exit checks) -> `run_scan()`.
+- "Market open" means any of four KST sessions: 데이마켓 10:00-17:50, 프리마켓 18:00-23:30, 정규장 23:30-06:00, 애프터마켓 06:00-09:50. Scans therefore run almost around the clock on weekdays. Closed from Saturday 09:50 through Sunday. Times are fixed KST clock times from local `datetime.now()`; there is no US DST adjustment and the host is assumed to be in KST.
+- `/scan` from Telegram spawns a daemon thread guarded by `scan_lock` and the `is_scanning` flag. The scheduled loop only checks `is_scanning`; it does not take the lock. Manual scans skip `check_positions()` and are the only scans that send a "no signal" message.
 
-### Data Flow
+### Which patterns actually run
 
-```
-Telegram Commands → BreakoutDetector.process_command()
-                         ↓
-              Data: get_us_stock_data() (yfinance)
-                         ↓
-              Pattern: detect_pivot_breakout() → Signal?
-                    ↓                              ↓
-                  YES                             NO
-                   ↓                              ↓
-           Check: can_send_alert()?          Skip
-                   ↓
-           AlertRepository.add() (prevent duplicates)
-           TelegramClient.send_message()
-           PositionManager.add()
-                   ↓
-         Periodic check_positions() (every 30 min)
-                   ↓
-         Exit on: stop-loss / take-profit / 30-day expiry
-```
+- **The live bot detects only pivot breakout.** `analyze_stock()` calls `detect_pivot_breakout` alone, and `format_signal_message` is hardcoded for it.
+- `patterns/cup_handle.py` and `patterns/base.py` use the backtest signature `(df, idx, ...) -> (bool, resistance)`, not the live signature `(df, ticker, market, **thresholds) -> signal dict | None`. They are not wired into the live scan.
+- `BacktestEngine` carries its **own inline copies** of cup-and-handle and base detection with hardcoded thresholds and imports only `detect_pivot_breakout_at_index` (also hardcoded at 50% volume / 5% breakout). `PatternSettings` from `.env` affect the live pivot scan only; the backtest ignores them.
+- To add a live pattern: write a live-signature function in `patterns/`, append it in `analyze_stock()`, and make `format_signal_message` branch on `signal['pattern']`.
 
-### Configuration
+### Signal dict and pattern names
 
-All settings are loaded from `.env` file via `load_settings()`.
+`detect_pivot_breakout` returns `{'ticker','pattern','market','resistance','current_price','breakout_pct','volume_surge'}` with values cast to Python `float`. numpy scalars break JSON and psycopg2; `repository._convert_numpy_types` is the safety net for the `signal_data` JSONB column. Pattern names are Korean strings (`'피벗돌파'`, `'컵앤핸들'`, `'베이스돌파'`), stored in the `pattern` column, and form part of the alert dedupe key `(ticker, pattern, alert_date)`.
 
-Key environment variables (see `.env.example` for full list):
-- `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID` - Required for Telegram integration
-- `SSH_HOST`, `SSH_USER`, `SSH_KEY_PATH` - SSH tunnel for PostgreSQL
-- `DB_NAME`, `DB_USER`, `DB_PASSWORD` - PostgreSQL credentials
-- `SCAN_INTERVAL` - Scan period in seconds (default: 1800)
-- `STOP_LOSS_PCT`, `TAKE_PROFIT_PCT`, `MAX_HOLDING_DAYS` - Risk management
-- `VOLUME_SURGE_MIN`, `BREAKOUT_MAX` - Pattern detection thresholds
-- `US_STOCKS` - Watchlist (comma-separated)
+### Persistence
 
-### Telegram Commands
+- Positions and alerts live in PostgreSQL. The watchlist lives in `watchlist.json` next to the process (gitignored). `positions.json` / `POSITIONS_FILE` are legacy and unused.
+- `get_db_connection()` is a module-level singleton that reads `os.environ` directly, **not** `settings.database`. It works because `load_settings()` has already called `load_dotenv()`; standalone scripts must call `load_dotenv()` themselves (see `scripts/`).
+- Schema is created by `DatabaseConnection.init_tables()` on every `PositionManager` start (idempotent `CREATE ... IF NOT EXISTS`). Treat that as canonical. `scripts/create_database.py` adds an older `UNIQUE (ticker, status)` constraint that would block a second closed position for the same ticker; `init_tables()` instead uses a partial unique index on `ticker WHERE status = 'open'`.
+- `DatabaseConnection` serializes every query behind an `RLock`, pings with `SELECT 1`, and rebuilds tunnel + connection on `OperationalError` / `InterfaceError` (3 attempts). Non-connection exceptions are re-raised immediately.
 
-```
-/scan          - Trigger immediate market scan
-/positions     - Show current holdings with P&L
-/close TICKER  - Manually close a position
-/trades        - Show recent trade history
-/stats         - Show trading statistics
-/add TICKER    - Add stock to watchlist
-/remove TICKER - Remove from watchlist
-/list          - Show watchlist
-/status        - Show market hours status
-/help          - Show all commands
-```
+### Write-before-notify rule
 
-## Threading Model
+Every Telegram message that reflects a state change is sent only **after** the DB write succeeds:
 
-- **Main thread**: 30-minute scan loop (`run()` → `run_smart_scan()`)
-- **Daemon thread**: Telegram polling every 2 seconds (`start_command_listener()`)
-- **On-demand threads**: `/scan` command spawns daemon thread for manual scans
-- **`scan_lock`**: Mutex prevents overlapping scans
+- Signal: `has_position` -> `can_send_alert` (returns False on any DB error) -> `record_alert` (`INSERT ... ON CONFLICT DO NOTHING`) -> send message -> `positions.add`.
+- Close: `positions.close_position` (`UPDATE ... RETURNING id`) -> send message. A no-op UPDATE returns False and nothing is sent.
 
-## Adding New Features
+Keep this order when touching alert or position code; it is what prevents duplicate and phantom alerts.
 
-- **New Telegram command**: Add case in `BreakoutDetector.process_command()`
-- **New pattern detector**: Add function in `patterns/`, call from `analyze_stock()`. Pattern detectors are pure functions taking OHLCV DataFrame + thresholds.
-- **New config option**: Add field to appropriate dataclass in `config/settings.py`, handle in `load_settings()`
-- **New database table**: Add model in `database/models.py`, repository in `database/repository.py`, update `connection.py` init_tables()
-- **Backtest pattern**: Add detection method in `BacktestEngine`, call from `run_backtest()`
+### Exit logic
 
-## Key Implementation Details
+`PositionManager.check_exit_conditions` checks stop-loss, take-profit, then holding-day expiry. Stop-loss exits at the stored `stop_loss` price rather than the current price; the other two exit at current price. Defaults come from `TradingSettings` (-8% / +20% / 30 days). `check_positions()` fetches a fresh 5-day history per open position, one second apart.
 
-- **Database connection**: Uses SSH tunnel with auto-reconnect. Thread-safe via `RLock()`. Keepalive every 30 seconds.
-- **Alert deduplication**: `AlertRepository.can_send_alert()` prevents same ticker/pattern alerts on the same day.
-- **Market hours**: US regular session is 22:00-07:00 KST (next day). Smart scan only runs during market hours.
-- **Exit conditions**: Positions auto-close on stop-loss (-8%), take-profit (+20%), or 30-day expiry.
+### Logging
+
+`setup_logging()` replaces `sys.stdout` and `sys.stderr` with a `LoggerWriter`, so the whole codebase uses `print()` and output lands in `logs/bot.log` with KST-midnight rotation and 30 days retained. `print()` is the convention; don't introduce `logging.getLogger` calls just for consistency's sake.
+
+### Telegram
+
+`TelegramClient.get_updates` advances `last_update_id` for every update but only returns messages from the configured `TELEGRAM_CHAT_ID`, so messages from other chats are consumed and ignored. `process_command` returns the sentinel string `'SCAN'` to make the listener spawn a scan thread; any other string is sent back as the reply. All messages use HTML `parse_mode`. The persistent reply keyboard is defined in `DEFAULT_KEYBOARD`.
+
+## Configuration
+
+`load_settings()` locates `.env` by walking up from `config/settings.py`, loads it, then overrides dataclass defaults from `os.environ`. `.env.example` lists every key. `US_STOCKS` only seeds the watchlist when `watchlist.json` is absent; once the file exists it wins. The backtest CLI uses the first 20 tickers of `US_STOCKS` from settings, not `watchlist.json`, and writes `us_backtest_results.csv`.
+
+## Gotchas
+
+- `paramiko` is pinned `>=3.0,<4.0` because 4.0 removed `DSSKey`, which `sshtunnel` still imports.
+- `pykrx` and the `market='KR'` branches are leftovers from an earlier Korea-market version. The bot is US-only.
+- ruff and black use line length 100; ruff ignores E501.

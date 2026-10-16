@@ -35,7 +35,7 @@ The `scripts/test_*.py` files are manual DB checks, not pytest tests.
 
 ## Deployment
 
-Pushing to `develop` triggers `.github/workflows/deploy.yml`: it SSHes to the server, `pkill`s the running bot, does `git reset --hard origin/develop`, `pip install -e .`, and restarts with `setsid nohup .venv/bin/python3 -u -m us_oneil_simple`. **`develop` is the production branch.** `main` is the PR target. Every restart sends a "bot started" Telegram message.
+Pushing to `main` triggers `.github/workflows/deploy.yml`: it SSHes to the server, `pkill`s the running bot, does `git reset --hard origin/main` and checks out `main`, runs `pip install -e .`, and restarts with `setsid nohup .venv/bin/python3 -u -m us_oneil_simple`. **`main` is the only branch and it is production.** Every push to it, including docs-only commits, restarts the bot and sends a "bot started" Telegram message.
 
 ## Architecture
 

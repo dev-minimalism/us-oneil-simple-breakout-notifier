@@ -1,5 +1,11 @@
 # William O'Neil Breakout Trading Bot (US Stocks)
 
+[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![yfinance](https://img.shields.io/badge/yfinance-410093)](https://pypi.org/project/yfinance/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram&logoColor=white)](https://core.telegram.org/bots)
+[![Deploy](https://img.shields.io/github/actions/workflow/status/dev-minimalism/us-oneil-simple-breakout-notifier/deploy.yml?label=Deploy&logo=githubactions&logoColor=white)](https://github.com/dev-minimalism/us-oneil-simple-breakout-notifier/actions/workflows/deploy.yml)
+
 **윌리엄 오닐 돌파매매 봇 - 미국 주식 전용 (CAN SLIM)**
 
 미국 주식 시장에서 차트 돌파 패턴(컵앤핸들, 피벗 포인트 돌파, 베이스 돌파)을 자동 감지하고 텔레그램으로 알림을 보내는 자동화 트레이딩 신호 시스템입니다.
